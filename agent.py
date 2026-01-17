@@ -1,4 +1,7 @@
-# ... (기존 임포트 생략)
+# ... (기존 임포트 생략)import os
+from openai import AsyncOpenAI
+from database import get_history, save_history  # 👈 이 줄이 반드시 있어야 합니다!
+from tools import TOOLS_SPEC # ... 기타 도구들
 async def ask_ara(user_input, user_id):
     history = get_history(user_id)
     
