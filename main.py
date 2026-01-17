@@ -160,3 +160,59 @@ async def kakao_endpoint(request: Request):
     response_text = await ask_ara(utterance, user_id)
 
     return build_kakao_response(response_text)
+
+    from fastapi import FastAPI, Request
+from agent import ask_ara  # 아라의 두뇌 기능을 가져옵니다.
+import uvicorn
+
+app = FastAPI()
+
+@app.post("/kakao")
+async def handle_kakao(request: Request):
+    # 1. 카카오톡이 보낸 전체 데이터를 JSON으로 받습니다.
+    body = await request.json()
+    
+    # 2. 기본 정보 추출
+    user_input = body.get('userRequest', {}).get('utterance', '')
+    user_id = body.get('userRequest', {}).get('user', {}).get('id', 'unknown_user')
+    
+    # 3. [핵심] 선장님이 설정한 파라미터들 추출 (String, Number, Boolean 처리)
+    params = body.get('action', {}).get('params', {})
+    
+    # [String] 캠퍼스 ID (기본값: yeongdo_main)
+    campus_id = str(params.get('campus_id', 'yeongdo_main'))
+    
+    # [Number] 최대 답변 길이 (기본값: 300, 숫자로 형변환)
+    max_len = int(params.get('max_response_len', 300))
+    
+    # [Boolean] AI 엔진 사용 여부 (기본값: True)
+    # 카카오 파라미터는 종종 문자열로 오므로 "true"를 불리언으로 변환해줍니다.
+    use_ai = params.get('use_ai_engine')
+    use_ai = True if use_ai in [True, "true", "True", "T"] else False
+
+    # 4. 아라에게 질문을 던질 때 파라미터 정보를 함께 보낼 수 있습니다.
+    # (여기서는 간단하게 user_input만 보내지만, 필요시 파라미터에 따라 로직을 분기합니다.)
+    if use_ai:
+        answer = await ask_ara(user_input, user_id)
+    else:
+        answer = f"[{campus_id} 알림] 현재 AI 엔진이 꺼져있어 답변이 어렵습니다."
+
+    # 5. 답변 길이 제한 (선장님이 설정한 max_len 적용)
+    final_answer = answer[:max_len]
+
+    # 6. 카카오톡이 이해할 수 있는 JSON 형식으로 응답합니다.
+    return {
+        "version": "2.0",
+        "template": {
+            "outputs": [
+                {
+                    "simpleText": {
+                        "text": final_answer
+                    }
+                }
+            ]
+        }
+    }
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=10000)
