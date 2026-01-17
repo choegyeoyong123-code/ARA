@@ -11,16 +11,16 @@ def startup():
     init_db()
 
 @app.post("/kakao")
-async def kakao(request: Request):
-    try:
-        body = await request.json()
-        u_id = body['userRequest']['user']['id']
-        query = body['userRequest']['utterance']
-        res = await ask_ara(query, u_id)
-        return {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": res}}]}}
-    except:
-        return {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "아라가 잠시 응답하기 어렵습니다. 🌊"}}]}}
+async def kakao_endpoint(request: Request):
+    payload = await request.json()
+    u_id = payload['userRequest']['user']['id']
+    text = payload['userRequest']['utterance']
+    
+    # 비동기 호출 시 await 누락 주의
+    response = await ask_ara(text, u_id)
+    return {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": response}}]}}
 
 if __name__ == "__main__":
+    # Render의 PORT 환경변수 우선 적용
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
