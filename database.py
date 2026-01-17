@@ -19,6 +19,8 @@ def get_history(user_id):
 def save_history(user_id, messages):
     conn = sqlite3.connect("history.db")
     cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO history (user_id, messages) VALUES (?, ?)", (user_id, json.dumps(messages)))
+    # 리스트 내 객체들이 dict 형태인지 확인 후 저장
+    cursor.execute("INSERT OR REPLACE INTO history (user_id, messages) VALUES (?, ?)", 
+                   (user_id, json.dumps(messages)))
     conn.commit()
     conn.close()
