@@ -1,0 +1,21 @@
+# [Python] 컴파일 및 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# [Environment] 가상환경 및 비밀키 (절대 유출 금지)
+.env
+.venv
+venv/
+env/
+
+# [IDE] 에디터 설정 파일
+.vscode/
+.idea/
+
+# [OS] 운영체제 임시 파일
+.DS_Store
+Thumbs.db
+
+# [Data] 만약 로그 파일 등이 생긴다면 무시하고 싶을 때 추가
+*.log
