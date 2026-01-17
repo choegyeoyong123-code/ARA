@@ -192,11 +192,15 @@ async def handle_kakao(request: Request):
 
     # 4. 아라에게 질문을 던질 때 파라미터 정보를 함께 보낼 수 있습니다.
     # (여기서는 간단하게 user_input만 보내지만, 필요시 파라미터에 따라 로직을 분기합니다.)
-    if use_ai:
-        answer = await ask_ara(user_input, user_id)
-    else:
-        answer = f"[{campus_id} 알림] 현재 AI 엔진이 꺼져있어 답변이 어렵습니다."
 
+# [수정] 파라미터가 없어도 기본적으로 AI를 사용하도록(True) 변경합니다.
+        use_ai_param = params.get('use_ai_engine')
+        
+        # 설정값이 없거나(None), 명시적으로 true인 경우 모두 AI를 켭니다.
+        if use_ai_param is None or use_ai_param in [True, "true", "True", "T"]:
+            use_ai = True
+        else:
+            use_ai = False
     # 5. 답변 길이 제한 (선장님이 설정한 max_len 적용)
     final_answer = answer[:max_len]
 
