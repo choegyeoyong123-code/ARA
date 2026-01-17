@@ -4,3 +4,4 @@ openai
 requests
 pandas
 python-multipart
+httpx

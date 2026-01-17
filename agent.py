@@ -1,74 +1,89 @@
 import os
 import json
-from openai import OpenAI
-# tools.py 함수들 임포트
+import asyncio
+from openai import AsyncOpenAI
+from database import get_history, save_history
 from tools import (
-    TOOLS_SPEC, 
-    get_weather, 
-    get_bus_190, 
-    get_meal, 
-    search_places, 
-    get_academic_calendar, 
-    get_shuttle_info,
-    get_school_link 
+    TOOLS_SPEC, get_weather_real, get_festivals, 
+    get_busan_restaurants, get_hospitals, get_meal, 
+    get_inside_bus_status, get_shuttle_info
 )
 
-# [중요] API Key는 반드시 환경변수에서 가져옵니다 (보안 필수)
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def ask_ara(user_input, user_id="test_user"):
-    messages = [
-        {"role": "system", "content": """너는 한국해양대학교 AI 짝꿍 '아라'야.
-        친구처럼 다정하게 존댓말을 써. 이모지를 적절히 사용해. 🐬💙
-        답변은 카카오톡 환경을 고려해 3줄 이내로 짧고 명확하게 해줘."""},
-        {"role": "user", "content": user_input}
-    ]
+async def ask_ara(user_input, user_id):
+    history = get_history(user_id)
+    
+    if not history:
+        history.append({
+            "role": "system", 
+            "content": """너는 한국해양대학교 내부 교통 특화 AI '아라'야. 🐬💙
+            [필수 지침]
+            1. 학교 안까지 들어오는 190번(구본관)과 88(A)번(승선생활관) 정보에만 집중해.
+            2. 나머지 외부 노선은 대기업 지도를 보라고 안내해.
+            3. 답변은 무조건 3줄 이내로, 친절한 존댓말로 해줘."""
+        })
+    
+    history.append({"role": "user", "content": user_input})
 
     try:
-        # 1. GPT에게 질문 (가장 빠른 gpt-4o-mini 사용)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",  # <--- 속도 해결의 핵심!
-            messages=messages,
+        # [정밀도 확보] 선장님 요청에 따른 Temperature=0 설정
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=history,
             tools=TOOLS_SPEC,
-            tool_choice="auto"
+            tool_choice="auto",
+            temperature=0  
         )
         
-        response_message = response.choices[0].message
+        msg = response.choices[0].message
         
-        # 2. 도구(함수) 사용 여부 확인
-        if response_message.tool_calls:
-            messages.append(response_message)
+        if msg.tool_calls:
+            history.append(msg)
+            tasks = []
+            call_ids = []
             
-            for tool_call in response_message.tool_calls:
-                function_name = tool_call.function.name
-                function_args = json.loads(tool_call.function.arguments)
+            for tool_call in msg.tool_calls:
+                f_name = tool_call.function.name
+                call_ids.append(tool_call.id)
                 
-                # 도구 실행
-                tool_result = "정보 없음"
-                if function_name == "get_weather": tool_result = get_weather()
-                elif function_name == "get_bus_190": tool_result = get_bus_190()
-                elif function_name == "get_meal": tool_result = get_meal()
-                elif function_name == "get_academic_calendar": tool_result = get_academic_calendar()
-                elif function_name == "get_shuttle_info": tool_result = get_shuttle_info()
-                elif function_name == "get_school_link": tool_result = get_school_link(function_args.get("category"))
-                elif function_name == "search_places": tool_result = search_places(function_args.get("query"))
+                # 도구 매핑 및 병렬 실행 준비
+                if f_name == "get_inside_bus_status": tasks.append(get_inside_bus_status())
+                elif f_name == "get_shuttle_info": tasks.append(get_shuttle_info())
+                elif f_name == "get_weather_real": tasks.append(get_weather_real())
+                elif f_name == "get_meal": tasks.append(get_meal())
+                elif f_name == "get_festivals": tasks.append(get_festivals())
+                elif f_name == "get_busan_restaurants": tasks.append(get_busan_restaurants())
+                elif f_name == "get_hospitals": tasks.append(get_hospitals())
+            
+            results = await asyncio.gather(*tasks)
+            
+            for cid, res in zip(call_ids, results):
+                history.append({"tool_call_id": cid, "role": "tool", "content": str(res)})
 
-                messages.append({
-                    "tool_call_id": tool_call.id,
-                    "role": "tool",
-                    "name": function_name,
-                    "content": str(tool_result)
-                })
-
-            # 3. 최종 답변 생성
-            final_response = client.chat.completions.create(
-                model="gpt-4o-mini", # <--- 여기도 mini 사용
-                messages=messages
+            final_response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=history,
+                temperature=0
             )
-            return final_response.choices[0].message.content
-        
-        return response_message.content
+            answer = final_response.choices[0].message.content
+        else:
+            answer = msg.content
+
+        history.append({"role": "assistant", "content": answer})
+        save_history(user_id, history)
+        return answer
 
     except Exception as e:
-        print(f"Error: {e}")
-        return "지금 잠시 연결이 불안정해! 😵‍💫 3초 뒤에 다시 말 걸어줘."
+        print(f"🚨 Agent Error: {e}")
+        return "아라가 잠시 기억을 정리 중이야! 🌊 잠시 후에 다시 말 걸어줘!"
+
+        # agent.py 내부의 system_prompt 수정
+system_prompt_content = """너는 한국해양대학교 내부 교통 및 생활 밀착형 AI '아라'야. 🐬💙
+[전략 가이드]
+1. 190번(구본관)과 88(A)번(승선관) 정보에 집중할 것.
+2. 맛집 추천 시 '현재 영업 중'인지 여부를 강조해서 알려줄 것.
+3. 반드시 제공된 지도 링크(🔗)를 함께 전달하여 사용자가 바로 길찾기를 할 수 있게 해줘.
+4. 답변은 3줄 이내로 간결하게!"""
+
+# GPT 호출 시 temperature=0 설정을 통해 링크 주소를 임의로 지어내지 않게 함
