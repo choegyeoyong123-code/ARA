@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -14,6 +15,8 @@ import httpx
 # 환경 변수 설정 (요청 반영)
 # =========================
 
+ENV_MODE = (os.environ.get("ENV_MODE") or "prod").strip().lower()
+
 ODSAY_API_KEY = os.environ.get("ODSAY_API_KEY") or os.environ.get("ODSAY_KEY")
 DATA_GO_KR_SERVICE_KEY = (
     os.environ.get("DATA_GO_KR_SERVICE_KEY")
@@ -21,8 +24,9 @@ DATA_GO_KR_SERVICE_KEY = (
     or os.environ.get("SERVICE_KEY")
 )
 
-# 요청하신 교정본과 동일하게 기본 False 고정
-HTTPX_VERIFY = False
+# SSL 보안 강화: 운영 기본 True, 개발(dev)에서만 False 허용
+# - 로컬에서 인증서 문제가 발생하는 경우에만 dev 모드로 사용하세요.
+HTTPX_VERIFY = False if ENV_MODE == "dev" else True
 
 # 비용 최적화(기존 요구사항)용 간단 캐시
 CACHE_TTL_SECONDS = int(os.environ.get("ARA_CACHE_TTL_SECONDS", "60"))
@@ -49,6 +53,11 @@ def _safe_get(d: Any, *keys: str, default: Any = None) -> Any:
         cur = cur.get(k)
     return default if cur is None else cur
 
+def _strip_html(s: str) -> str:
+    if not s:
+        return ""
+    return re.sub(r"<[^>]+>", "", str(s)).strip()
+
 _CACHE: Dict[str, Tuple[float, Any]] = {}
 
 def _make_cache_key(prefix: str, url: str, params: Dict[str, Any]) -> str:
@@ -69,14 +78,22 @@ def _cache_get(key: str) -> Optional[Any]:
 def _cache_set(key: str, value: Any) -> None:
     _CACHE[key] = (time.time(), value)
 
-async def _http_get_json(url: str, params: Dict[str, Any], timeout: float = 10.0) -> Dict[str, Any]:
+async def _http_get_json(
+    url: str,
+    params: Dict[str, Any],
+    timeout: float = 10.0,
+    client: Optional[httpx.AsyncClient] = None,
+) -> Dict[str, Any]:
     cache_key = _make_cache_key("GETJSON", url, params)
     cached = _cache_get(cache_key)
     if cached is not None:
         return {"status": "success", "data": cached, "cached": True}
 
     try:
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
+        if client is None:
+            async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as _client:
+                res = await _client.get(url, params=params, timeout=timeout)
+        else:
             res = await client.get(url, params=params, timeout=timeout)
         res.raise_for_status()
         data = res.json()
@@ -206,8 +223,11 @@ _OCEAN_VIEW_STOPS: Dict[str, List[Dict[str, Any]]] = {
 }
 
 async def get_bus_arrival(bus_number: str = None, direction: str = None):
-    if not ODSAY_API_KEY:
-        return json.dumps({"status": "error", "msg": "ODSAY_API_KEY 미설정"}, ensure_ascii=False)
+    # 런타임 기준으로 다시 읽어, 로드 순서/리로드 영향 최소화
+    runtime_key = os.environ.get("ODSAY_API_KEY") or os.environ.get("ODSAY_KEY") or ODSAY_API_KEY
+
+    if not runtime_key:
+        return json.dumps({"status": "error", "msg": "죄송합니다. ODSAY_API_KEY가 설정되지 않아 버스 정보를 조회할 수 없습니다."}, ensure_ascii=False)
 
     dir_up = (direction or "").strip().upper()
     if dir_up not in {"OUT", "IN"}:
@@ -227,30 +247,33 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
     realtime_url = "https://api.odsay.com/v1/api/realtimeStation"
 
     stops_result: List[Dict[str, Any]] = []
-    any_arrivals = False
-    any_unfiltered = False
     suggestions: List[Dict[str, Any]] = []
 
-    for stop in _OCEAN_VIEW_STOPS[dir_up]:
+    async def _fetch_stop(stop: Dict[str, Any], client: httpx.AsyncClient) -> Dict[str, Any]:
         search_res = await _http_get_json(
             search_url,
-            {"apiKey": ODSAY_API_KEY, "stationName": stop["query"], "CID": "6"},
+            {"apiKey": runtime_key, "stationName": stop["query"], "CID": "6"},
             timeout=10.0,
+            client=client,
         )
         if search_res["status"] != "success":
-            stops_result.append({"label": stop["label"], "status": "error", "msg": search_res.get("msg", "정류장 검색 실패")})
-            continue
+            return {"label": stop["label"], "status": "error", "msg": search_res.get("msg", "정류장 검색 실패"), "_any_unfiltered": False, "_any_arrivals": False}
 
         stations = _safe_get(search_res, "data", "result", "station", default=[]) or []
         station_id = _pick_station_id(stations, stop["priority"])
         if not station_id:
-            stops_result.append({"label": stop["label"], "status": "station_not_found", "msg": "정류장을 찾을 수 없습니다."})
-            continue
+            return {"label": stop["label"], "status": "station_not_found", "msg": "정류장을 찾을 수 없습니다.", "_any_unfiltered": False, "_any_arrivals": False}
 
-        arr_res = await _http_get_json(realtime_url, {"apiKey": ODSAY_API_KEY, "stationID": station_id}, timeout=10.0)
+        arr_res = await _http_get_json(realtime_url, {"apiKey": runtime_key, "stationID": station_id}, timeout=10.0, client=client)
         if arr_res["status"] != "success":
-            stops_result.append({"label": stop["label"], "station_id": station_id, "status": "error", "msg": arr_res.get("msg", "도착 정보 조회 실패")})
-            continue
+            return {
+                "label": stop["label"],
+                "station_id": station_id,
+                "status": "error",
+                "msg": arr_res.get("msg", "도착 정보 조회 실패"),
+                "_any_unfiltered": False,
+                "_any_arrivals": False,
+            }
 
         arrival_list = _safe_get(arr_res, "data", "result", "realtimeArrivalList", default=[]) or []
         unfiltered_buses: List[Dict[str, Any]] = []
@@ -271,22 +294,34 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
                 continue
             filtered_buses.append(entry)
 
-        if unfiltered_buses:
-            any_unfiltered = True
-        if filtered_buses:
-            any_arrivals = True
+        result = {
+            "label": stop["label"],
+            "station_id": station_id,
+            "status": "success",
+            "buses": filtered_buses[:5],
+            "_any_unfiltered": bool(unfiltered_buses),
+            "_any_arrivals": bool(filtered_buses),
+            "_suggestion": {"label": stop["label"], "buses": unfiltered_buses[:3]} if (not filtered_buses and unfiltered_buses) else None,
+        }
+        return result
 
-        if not filtered_buses and unfiltered_buses:
-            suggestions.append({"label": stop["label"], "buses": unfiltered_buses[:3]})
+    any_arrivals = False
+    any_unfiltered = False
+    async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
+        tasks = [_fetch_stop(stop, client) for stop in _OCEAN_VIEW_STOPS[dir_up]]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        stops_result.append(
-            {
-                "label": stop["label"],
-                "station_id": station_id,
-                "status": "success",
-                "buses": filtered_buses[:5],
-            }
-        )
+    for idx, r in enumerate(results):
+        if isinstance(r, Exception):
+            stop = _OCEAN_VIEW_STOPS[dir_up][idx]
+            stops_result.append({"label": stop["label"], "status": "error", "msg": str(r)})
+            continue
+        any_arrivals = any_arrivals or bool(r.pop("_any_arrivals", False))
+        any_unfiltered = any_unfiltered or bool(r.pop("_any_unfiltered", False))
+        sugg = r.pop("_suggestion", None)
+        if sugg:
+            suggestions.append(sugg)
+        stops_result.append(r)
 
     if not any_arrivals and any_unfiltered:
         return json.dumps(
@@ -364,21 +399,53 @@ async def get_cheap_eats(food_type: str = "한식"):
         return json.dumps({"status": "error", "msg": res.get("msg", "API 호출 실패")}, ensure_ascii=False)
 
     try:
-        items = _safe_get(res, "data", "getGoodPriceStore", "item", default=[]) or []
+        # API 응답 구조 fail-safe (일부는 response.body.items.item 형태)
+        items = _safe_get(res, "data", "getGoodPriceStore", "item", default=None)
+        if not items:
+            items = _safe_get(res, "data", "response", "body", "items", "item", default=[]) or []
+        if isinstance(items, dict):
+            items = [items]
         targets = []
         for i in items:
-            if "영도구" in (i.get("addr", "") or "") and (food_type in (i.get("induty", "") or "")):
-                targets.append(
-                    {
-                        "name": i.get("sj"),
-                        "menu": i.get("menu"),
-                        "price": i.get("price"),
-                        "tel": i.get("tel"),
-                        "addr": i.get("addr"),
-                        "desc": i.get("cn", ""),
-                    }
+            addr = (i.get("adres") or i.get("addr") or "").strip()
+            if "영도" not in addr:
+                continue
+
+            # food_type은 데이터 필드가 일정치 않아 보수적으로 적용(비어있으면 필터 생략)
+            if food_type:
+                blob = " ".join(
+                    [
+                        str(i.get("cn", "") or ""),
+                        str(i.get("mNm", "") or ""),
+                        str(i.get("sj", "") or ""),
+                        _strip_html(i.get("intrcn", "") or ""),
+                    ]
                 )
+                if food_type not in blob:
+                    continue
+
+            targets.append(
+                {
+                    "name": (i.get("sj") or "").strip(),
+                    "addr": addr,
+                    "tel": (i.get("tel") or "").strip(),
+                    "time": (i.get("bsnTime") or "").strip(),
+                    "desc": _strip_html(i.get("intrcn", "") or ""),
+                }
+            )
         if not targets:
+            # 공공데이터에서 영도권 결과가 없으면 로컬 CSV로 graceful fallback
+            places = _read_places_csv(limit=5)
+            if places:
+                return json.dumps(
+                    {
+                        "status": "success",
+                        "source": "local_csv_fallback",
+                        "msg": "공공데이터에서 영도구 착한가격 식당을 충분히 확인하지 못해, 로컬 추천 목록으로 안내드립니다.",
+                        "restaurants": places,
+                    },
+                    ensure_ascii=False,
+                )
             return json.dumps({"status": "empty", "msg": "조건에 맞는 식당 정보를 찾지 못했습니다."}, ensure_ascii=False)
         return json.dumps({"status": "success", "source": "public_api", "restaurants": targets[:5]}, ensure_ascii=False)
     except Exception as e:
@@ -395,13 +462,30 @@ async def get_medical_info(kind: str = "약국"):
         return json.dumps({"status": "error", "msg": res.get("msg", "API 호출 실패")}, ensure_ascii=False)
 
     try:
-        items = _safe_get(res, "data", "MedicalInstitInfo", "item", default=[]) or []
+        # API 응답 구조 fail-safe (일부는 response.body.items.item 형태)
+        items = _safe_get(res, "data", "MedicalInstitInfo", "item", default=None)
+        if not items:
+            items = _safe_get(res, "data", "response", "body", "items", "item", default=[]) or []
+        if isinstance(items, dict):
+            items = [items]
         targets = []
         for i in items:
-            addr = i.get("addr", "") or ""
-            instit_kind = i.get("instit_kind", "") or ""
-            if "영도구" in addr and kind in instit_kind:
-                targets.append({"name": i.get("instit_nm"), "tel": i.get("tel"), "addr": addr, "time": i.get("trtm_mon_end")})
+            addr = (i.get("street_nm_addr") or i.get("organ_loc") or i.get("addr") or "").strip()
+            instit_kind = (i.get("instit_kind") or i.get("medical_instit_kind") or "").strip()
+            if "영도구" not in addr:
+                continue
+            if kind and kind not in instit_kind:
+                continue
+            targets.append(
+                {
+                    "name": (i.get("instit_nm") or "").strip(),
+                    "kind": instit_kind,
+                    "tel": (i.get("tel") or "").strip(),
+                    "addr": addr,
+                    # 대표 운영시간으로 monday를 우선 사용(원문 문자열만 그대로 사용)
+                    "time": (i.get("monday") or "").strip(),
+                }
+            )
         if not targets:
             return json.dumps({"status": "empty", "msg": "조건에 맞는 의료 기관 정보를 찾지 못했습니다."}, ensure_ascii=False)
         return json.dumps({"status": "success", "hospitals": targets[:5]}, ensure_ascii=False)

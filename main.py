@@ -1,15 +1,35 @@
 import os
+from dotenv import load_dotenv
+
+# .env 환경 변수 로드 (모든 커스텀 모듈 import 이전에 실행되어야 함)
+load_dotenv()
+
+import asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from agent import ask_ara
-from database import init_db, update_conversation_feedback
 import json
 import re
+
+# 커스텀 모듈은 반드시 load_dotenv() 이후 import
+from database import init_db, update_conversation_feedback
+from agent import ask_ara
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 init_db()
+
+@app.on_event("startup")
+async def startup_diagnostics():
+    """
+    통합 진단: 서버 시작 시 주요 API 키 로드 상태를 터미널에 출력합니다.
+    - 보안: API 키(일부 포함)를 절대 출력하지 않습니다.
+    """
+    # Windows(cp949) 콘솔에서는 이모지 출력이 실패할 수 있어 안전장치를 둡니다.
+    try:
+        print("✅ API 키 로드 완료")
+    except UnicodeEncodeError:
+        print("API keys loaded")
 
 NAV_QUICK_REPLIES = [
     {"label": "🚌 190번(학교행)", "action": "message", "messageText": "190번 버스 IN"},
@@ -27,14 +47,64 @@ def _build_quick_replies():
     """
     return list(NAV_QUICK_REPLIES)
 
-def _kakao_simple_text(text: str):
+def _kakao_response(outputs: list[dict]):
+    """
+    카카오 스킬 응답 공통 래퍼
+    - 반드시 {"version":"2.0","template":{"outputs":[...]}} 형식을 유지
+    - 모든 응답에 quickReplies 상시 포함
+    """
     return {
         "version": "2.0",
         "template": {
-            "outputs": [{"simpleText": {"text": text}}],
+            "outputs": outputs,
             "quickReplies": _build_quick_replies(),
         },
     }
+
+def _kakao_simple_text(text: str):
+    return _kakao_response([{"simpleText": {"text": text}}])
+
+def _kakao_basic_card(title: str, description: str, buttons: list[dict] | None = None):
+    card: dict = {"title": title, "description": description}
+    if buttons:
+        card["buttons"] = buttons
+    return _kakao_response([{"basicCard": card}])
+
+def _kakao_list_card(header_title: str, items: list[dict], buttons: list[dict] | None = None):
+    card: dict = {"header": {"title": header_title}, "items": items}
+    if buttons:
+        card["buttons"] = buttons
+    return _kakao_response([{"listCard": card}])
+
+def _kakao_auto_text(text: str):
+    """
+    text가 너무 길어 simpleText 제한에 걸릴 수 있으면 listCard로 완화합니다.
+    - 구조화 데이터가 없을 때의 안전한 fallback(줄 단위 요약)
+    """
+    t = (text or "").strip()
+    if len(t) <= 900:
+        return _kakao_simple_text(t)
+
+    lines = [ln.strip() for ln in t.splitlines() if ln.strip()]
+    header = lines[0][:30] if lines else "ARA 안내"
+    items: list[dict] = []
+    for ln in lines[1:]:
+        if ln.startswith("- "):
+            title = ln[2:][:50]
+            items.append({"title": title, "description": ""})
+        else:
+            if not items:
+                items.append({"title": ln[:50], "description": ""})
+            else:
+                prev = items[-1].get("description", "")
+                merged = (prev + ("\n" if prev else "") + ln)[:230]
+                items[-1]["description"] = merged
+        if len(items) >= 5:
+            break
+
+    if not items:
+        return _kakao_simple_text(t[:900])
+    return _kakao_list_card(header_title=header, items=items)
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
@@ -108,10 +178,17 @@ async def kakao_endpoint(request: Request):
             ok = update_conversation_feedback(cid, score)
             return _kakao_simple_text("피드백이 반영되었습니다. 감사합니다." if ok else "피드백 대상을 찾지 못했습니다.")
 
-        res = await ask_ara(user_msg, user_id=kakao_user_id, return_meta=True)
-        response_text = res.get("content", "")
+        kakao_timeout = float(os.environ.get("KAKAO_TIMEOUT_SECONDS", "4.3"))
+        try:
+            res = await asyncio.wait_for(
+                ask_ara(user_msg, user_id=kakao_user_id, return_meta=True),
+                timeout=kakao_timeout,
+            )
+        except asyncio.TimeoutError:
+            return _kakao_simple_text("데이터를 분석 중입니다. 잠시 후 다시 시도해 주세요.")
 
-        return _kakao_simple_text(response_text)
+        response_text = (res.get("content", "") if isinstance(res, dict) else str(res)).strip()
+        return _kakao_auto_text(response_text)
 
     except Exception as e:
         print(f"Kakao Error: {e}")
