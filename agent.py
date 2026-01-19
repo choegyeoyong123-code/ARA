@@ -5,7 +5,7 @@ import re
 import uuid
 from openai import AsyncOpenAI
 from tools import TOOLS_SPEC, get_bus_arrival, get_cheap_eats, get_medical_info, get_kmou_weather, get_festival_info
-from database import init_db, save_conversation_pair, get_success_examples
+from database import init_db, save_conversation_pair, get_success_examples, get_history, save_history
 
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = AsyncOpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
@@ -182,7 +182,13 @@ def _format_bus_response(payload: dict, bus_number: str | None, direction: str, 
 
 async def ask_ara(user_input, history=None, user_id: str | None = None, return_meta: bool = False):
     if history is None:
-        history = []
+        if user_id:
+            try:
+                history = get_history(user_id)
+            except Exception:
+                history = []
+        else:
+            history = []
 
     # DB 초기화(테이블/컬럼 보장)
     init_db()
@@ -481,6 +487,12 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
                 temperature=0.5,
             )
             response_text = _sanitize_response_text_with_context(final_res.choices[0].message.content, user_input)
+            if user_id:
+                try:
+                    new_history = (history or []) + [{"role": "user", "content": user_input}, {"role": "assistant", "content": response_text}]
+                    save_history(user_id, new_history[-20:])
+                except Exception:
+                    pass
             save_conversation_pair(
                 conversation_id=conversation_id,
                 user_id=user_id,
@@ -495,6 +507,12 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             return response_text
         
         response_text = _sanitize_response_text_with_context(msg.content, user_input)
+        if user_id:
+            try:
+                new_history = (history or []) + [{"role": "user", "content": user_input}, {"role": "assistant", "content": response_text}]
+                save_history(user_id, new_history[-20:])
+            except Exception:
+                pass
         save_conversation_pair(
             conversation_id=conversation_id,
             user_id=user_id,

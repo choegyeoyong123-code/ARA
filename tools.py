@@ -6,7 +6,7 @@ import os
 import re
 import time
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -16,6 +16,8 @@ import httpx
 # =========================
 
 ENV_MODE = (os.environ.get("ENV_MODE") or "prod").strip().lower()
+ARA_REF_DATE = (os.environ.get("ARA_REF_DATE") or "20260120").strip()
+ARA_REF_TIME = (os.environ.get("ARA_REF_TIME") or "0630").strip()
 
 ODSAY_API_KEY = os.environ.get("ODSAY_API_KEY") or os.environ.get("ODSAY_KEY")
 DATA_GO_KR_SERVICE_KEY = (
@@ -38,6 +40,60 @@ HEADERS = {
 # =========================
 # 공통 유틸
 # =========================
+
+def _reference_datetime() -> datetime:
+    """
+    데이터 무결성 기준 시각(요청 반영)
+    - 기본: 2026-01-20 06:30 (ARA_REF_DATE/ARA_REF_TIME로 오버라이드 가능)
+    """
+    d = re.sub(r"\D+", "", ARA_REF_DATE)
+    t = re.sub(r"\D+", "", ARA_REF_TIME)
+    if len(d) != 8:
+        d = "20260120"
+    if len(t) not in (3, 4):
+        t = "0630"
+    if len(t) == 3:
+        t = "0" + t
+    try:
+        return datetime(int(d[0:4]), int(d[4:6]), int(d[6:8]), int(t[0:2]), int(t[2:4]))
+    except Exception:
+        return datetime(2026, 1, 20, 6, 30)
+
+def _ref_date_floor_20260120() -> str:
+    """base_date는 최소 20260120을 보장합니다."""
+    ref = _reference_datetime().strftime("%Y%m%d")
+    return "20260120" if ref < "20260120" else ref
+
+def _extract_ymd(date_text: str) -> Optional[datetime]:
+    """문자열에서 YYYYMMDD(또는 YYYY-MM-DD/YY년MM월DD일 등) 추출. 불확실하면 None."""
+    if not date_text:
+        return None
+    s = str(date_text)
+    m = re.search(r"(?P<y>20\d{2})\s*[.\-/년]\s*(?P<m>\d{1,2})\s*[.\-/월]\s*(?P<d>\d{1,2})", s)
+    if not m:
+        m = re.search(r"(?P<y>20\d{2})\s*(?P<m>\d{2})\s*(?P<d>\d{2})", re.sub(r"\D+", "", s))
+    if not m:
+        return None
+    try:
+        return datetime(int(m.group("y")), int(m.group("m")), int(m.group("d")))
+    except Exception:
+        return None
+
+def _parse_hours_range(s: str) -> Optional[Tuple[int, int]]:
+    """
+    '09:00~18:00' -> (540, 1080) 분 단위.
+    불확실하면 None.
+    """
+    if not s:
+        return None
+    m = re.search(r"(?P<sh>\d{1,2})\s*:\s*(?P<sm>\d{2})\s*~\s*(?P<eh>\d{1,2})\s*:\s*(?P<em>\d{2})", str(s))
+    if not m:
+        return None
+    try:
+        sh, sm, eh, em = int(m.group("sh")), int(m.group("sm")), int(m.group("eh")), int(m.group("em"))
+        return (sh * 60 + sm, eh * 60 + em)
+    except Exception:
+        return None
 
 def _extract_digits(s: str) -> str:
     """오타/접미사(190qjs, 190번 등)에서 숫자만 추출"""
@@ -112,8 +168,9 @@ async def get_kmou_weather():
         return json.dumps({"status": "error", "msg": "기상청 API 키가 없습니다."}, ensure_ascii=False)
 
     url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
-    now = datetime.now()
-    base_date = now.strftime("%Y%m%d")
+    # 데이터 무결성: 기준일/시간(기본 2026-01-20 06:30)을 사용
+    now = _reference_datetime()
+    base_date = _ref_date_floor_20260120()
     base_time_primary = now.strftime("%H00") if now.minute < 35 else now.strftime("%H30")
 
     # 안정성: 기본 교정 로직(00/30) + 실패 시 전 시각(HH00) fallback
@@ -243,11 +300,81 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
     # 요청 교정본: 기본값 190
     target_bus_num = _extract_digits(bus_number) if bus_number else "190"
 
-    search_url = "https://api.odsay.com/v1/api/searchStation"
     realtime_url = "https://api.odsay.com/v1/api/realtimeStation"
 
-    stops_result: List[Dict[str, Any]] = []
-    suggestions: List[Dict[str, Any]] = []
+    # 정류장 ID 정밀 매칭(요청 반영): 방향(IN/OUT)에 따라 정류장ID를 강제 사용
+    # - IN(학교행): 03058 (한국해양대학교본관)
+    # - OUT(진출행): 03053 (해양대입구 - 영도대교 방면)
+    station_id = "03058" if dir_up == "IN" else "03053"
+    label = "한국해양대학교본관" if dir_up == "IN" else "해양대입구(영도대교 방면)"
+
+    # 카카오 5초 제한 대응: ODsay 호출은 짧은 타임아웃을 기본 적용
+    odsay_timeout = float(os.environ.get("ARA_ODSAY_TIMEOUT_SECONDS", "2.5"))
+    arr_res = await _http_get_json(realtime_url, {"apiKey": runtime_key, "stationID": station_id}, timeout=odsay_timeout)
+    if arr_res["status"] != "success":
+        return json.dumps(
+            {
+                "status": "error",
+                "msg": "현재 2026-01-20 실시간 버스 정보가 서버에서 응답하지 않습니다",
+                "direction": dir_up,
+                "bus_number": target_bus_num,
+                "station_id": station_id,
+            },
+            ensure_ascii=False,
+        )
+
+    arrival_list = _safe_get(arr_res, "data", "result", "realtimeArrivalList", default=[]) or []
+    unfiltered_buses: List[Dict[str, Any]] = []
+    filtered_buses: List[Dict[str, Any]] = []
+
+    for bus in arrival_list:
+        route_name = bus.get("routeNm", "")
+        entry = {
+            "bus_no": route_name,
+            "status": _safe_get(bus, "arrival1", "msg1", default="정보없음"),
+            "low_plate": "저상" if str(bus.get("lowPlate1")) == "1" else "일반",
+        }
+        unfiltered_buses.append(entry)
+        if target_bus_num and target_bus_num not in _extract_digits(route_name):
+            continue
+        filtered_buses.append(entry)
+
+    # 조회 자체는 되었으나, 필터 결과가 비어 있으면(또는 전체도 비어 있으면) 추측 없이 정직하게 보고
+    if not unfiltered_buses:
+        return json.dumps(
+            {
+                "status": "error",
+                "msg": "현재 2026-01-20 실시간 버스 정보가 서버에서 응답하지 않습니다",
+                "direction": dir_up,
+                "bus_number": target_bus_num,
+                "station_id": station_id,
+            },
+            ensure_ascii=False,
+        )
+
+    if target_bus_num and not filtered_buses:
+        return json.dumps(
+            {
+                "status": "fallback",
+                "direction": dir_up,
+                "bus_number": target_bus_num,
+                "station_id": station_id,
+                "msg": "요청하신 버스 번호로는 도착 정보를 찾지 못했습니다. 동일 정류장의 근접 도착 정보를 함께 제공합니다.",
+                "stops": [{"label": label, "station_id": station_id, "status": "success", "buses": []}],
+                "suggestions": [{"label": label, "buses": unfiltered_buses[:3]}],
+            },
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "status": "success",
+            "direction": dir_up,
+            "bus_number": target_bus_num,
+            "stops": [{"label": label, "station_id": station_id, "status": "success", "buses": filtered_buses[:5]}],
+        },
+        ensure_ascii=False,
+    )
 
     async def _fetch_stop(stop: Dict[str, Any], client: httpx.AsyncClient) -> Dict[str, Any]:
         search_res = await _http_get_json(
@@ -468,6 +595,10 @@ async def get_medical_info(kind: str = "약국"):
             items = _safe_get(res, "data", "response", "body", "items", "item", default=[]) or []
         if isinstance(items, dict):
             items = [items]
+        ref_dt = _reference_datetime()
+        weekday_field = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][ref_dt.weekday()]
+        ref_minutes = ref_dt.hour * 60 + ref_dt.minute
+
         targets = []
         for i in items:
             addr = (i.get("street_nm_addr") or i.get("organ_loc") or i.get("addr") or "").strip()
@@ -476,6 +607,13 @@ async def get_medical_info(kind: str = "약국"):
                 continue
             if kind and kind not in instit_kind:
                 continue
+            hours_str = (i.get(weekday_field) or i.get("monday") or "").strip()
+            rng = _parse_hours_range(hours_str)
+            is_open = False
+            if rng:
+                start_m, end_m = rng
+                is_open = (start_m <= ref_minutes <= end_m)
+
             targets.append(
                 {
                     "name": (i.get("instit_nm") or "").strip(),
@@ -483,7 +621,8 @@ async def get_medical_info(kind: str = "약국"):
                     "tel": (i.get("tel") or "").strip(),
                     "addr": addr,
                     # 대표 운영시간으로 monday를 우선 사용(원문 문자열만 그대로 사용)
-                    "time": (i.get("monday") or "").strip(),
+                    "time": hours_str or (i.get("monday") or "").strip(),
+                    "is_open": bool(is_open),
                 }
             )
         if not targets:
@@ -506,12 +645,297 @@ async def get_festival_info():
         items = _safe_get(res, "data", "getFestivalKr", "item", default=[]) or []
         targets = []
         for i in items:
-            targets.append({"title": i.get("MAIN_TITLE"), "place": i.get("MAIN_PLACE"), "date": i.get("USAGE_DAY_WEEK_AND_TIME")})
+            title = i.get("MAIN_TITLE")
+            place = i.get("MAIN_PLACE")
+            date_text = i.get("USAGE_DAY_WEEK_AND_TIME")
+
+            # 2026 데이터 무결성: 2026-01-20 이후 일정만 통과, 불확실하면 폐기
+            dt = _extract_ymd(str(date_text or ""))
+            if not dt:
+                continue
+            if dt.strftime("%Y%m%d") < "20260120":
+                continue
+            targets.append({"title": title, "place": place, "date": date_text, "date_ymd": dt.strftime("%Y%m%d")})
         if not targets:
-            return json.dumps({"status": "empty", "msg": "조회 가능한 축제 정보가 없습니다."}, ensure_ascii=False)
+            return json.dumps({"status": "empty", "msg": "2026-01-20 이후의 확정 일정만 제공할 수 있습니다."}, ensure_ascii=False)
         return json.dumps({"status": "success", "festivals": targets[:5]}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
+
+# =========================
+# 4) 셔틀/캠퍼스맵 (이미지 기반 기능 추가)
+# =========================
+
+def get_current_season(today: Optional[date] = None) -> str:
+    """
+    SeasonDetector (요청 반영)
+    - Winter Vacation: ~ 2026-02-28 (inclusive)
+    - Spring Semester(1st): 2026-03-02 ~ 2026-06-21 (inclusive)
+    """
+    d = today or date.today()
+    if d <= date(2026, 2, 28):
+        return "VACATION"
+    if date(2026, 3, 2) <= d <= date(2026, 6, 21):
+        return "SEMESTER"
+    # 범위 외에는 가장 보수적으로 학기중으로 간주(요청: 3/2 이후 자동 전환)
+    if d >= date(2026, 3, 2):
+        return "SEMESTER"
+    return "VACATION"
+
+def _hhmm_to_minutes(hhmm: str) -> Optional[int]:
+    if not hhmm:
+        return None
+    s = re.sub(r"\s+", "", str(hhmm))
+    m = re.match(r"^(\d{1,2}):(\d{2})$", s)
+    if not m:
+        m = re.match(r"^(\d{3,4})$", re.sub(r"\D+", "", s))
+        if not m:
+            return None
+        digits = m.group(1).zfill(4)
+        h, mi = int(digits[:2]), int(digits[2:])
+    else:
+        h, mi = int(m.group(1)), int(m.group(2))
+    if not (0 <= h <= 23 and 0 <= mi <= 59):
+        return None
+    return h * 60 + mi
+
+def _minutes_to_hhmm(m: int) -> str:
+    h = m // 60
+    mi = m % 60
+    return f"{h:02d}:{mi:02d}"
+
+_SHUTTLE_SEMESTER: Dict[str, List[str]] = {
+    "1-1": ["08:15", "09:00", "18:10"],
+    "2-1": ["08:00", "08:55", "11:00", "13:00", "16:10", "18:10"],
+}
+
+def _shuttle_3_1_semester_times() -> List[str]:
+    # 08:00 ~ 21:30, 20분 간격
+    start = 8 * 60
+    end = 21 * 60 + 30
+    return [_minutes_to_hhmm(m) for m in range(start, end + 1, 20)]
+
+_SHUTTLE_VACATION: Dict[str, Optional[List[str]]] = {
+    "1-1": None,  # 방학중 미운행
+    "2-1": None,  # 방학중 미운행
+    "3-1": [
+        "08:00", "08:30", "09:00", "09:30", "10:00",
+        "11:00", "11:30", "12:00", "12:30",
+        "14:00", "14:30", "15:00", "15:30",
+        "16:00", "16:30", "17:00",
+        "18:10", "18:30", "19:00", "20:00", "21:00",
+    ],
+}
+
+_SHUTTLE_NOTICE = "주말 및 법정 공휴일 운행 없음"
+
+# 이미지(시간표) 하단 텍스트 기반 노선 안내
+_SHUTTLE_ROUTE_BASE = (
+    "학내 출발점(해사대학관 앞) → 공과대학 1호관 앞 → 승선생활관 입구 → 릴랙스게이트 → 태종대 과일가게 앞 → 신흥하리상가 → "
+    "릴랙스게이트 → 승선생활관 입구 → 학내진입시 앵커탑 앞 좌회전(실습선 부두 방면) → 공대 1호관 후문 → 어울림관 → 학내 종점(해사대학관 앞)"
+)
+_SHUTTLE_ROUTE_MARKET = (
+    "학교 출발 12:40, 14:00, 18:10, 20:30 / 학내 종점(해사대학관 앞) → 공과대학 1호관 앞 → 승선생활관 입구 → 릴랙스게이트 → "
+    "롯데리아영도점 맞은편 버스 정류장 → 동삼시장 → 동삼시민공원입구(매물녀5번 정류장) → 태종대 과일가게 앞 → 신흥하리상가 → "
+    "릴랙스게이트 → 승선생활관 입구 → 학내진입시 앵커탑 앞에서 좌회전(실습선 부두 방면) → 공대 1호관 후문 → 어울림관 → 학내 종점(해사대학관 앞)"
+)
+
+async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None):
+    """셔틀 다음 N회 출발(시즌 자동 전환 + 실시간 필터)"""
+    # 기준 시각(시스템 시계)
+    now_dt = datetime.now()
+    if date_yyyymmdd:
+        digits = re.sub(r"\D+", "", str(date_yyyymmdd))
+        if len(digits) == 8:
+            try:
+                now_dt = datetime(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]), now_dt.hour, now_dt.minute)
+            except Exception:
+                pass
+    if now_hhmm:
+        mm = _hhmm_to_minutes(now_hhmm)
+        if mm is not None:
+            now_dt = now_dt.replace(hour=mm // 60, minute=mm % 60, second=0, microsecond=0)
+
+    season = get_current_season(now_dt.date())
+    is_weekend = now_dt.weekday() >= 5
+    if is_weekend:
+        return json.dumps(
+            {
+                "status": "no_service",
+                "season": season,
+                "msg": _SHUTTLE_NOTICE,
+                "next": [],
+                "route_base": _SHUTTLE_ROUTE_BASE,
+                "route_market": _SHUTTLE_ROUTE_MARKET,
+            },
+            ensure_ascii=False,
+        )
+
+    cur_min = now_dt.hour * 60 + now_dt.minute
+
+    departures: List[Tuple[int, str]] = []
+    inactive: List[str] = []
+
+    if season == "VACATION":
+        schedule = _SHUTTLE_VACATION
+        if schedule.get("1-1") is None:
+            inactive.append("1-1")
+        if schedule.get("2-1") is None:
+            inactive.append("2-1")
+        times_3 = schedule.get("3-1") or []
+        for t in times_3:
+            m = _hhmm_to_minutes(t)
+            if m is not None:
+                departures.append((m, "3-1 하리전용"))
+    else:
+        schedule = dict(_SHUTTLE_SEMESTER)
+        # 3-1 학기중 20분 간격
+        schedule["3-1"] = _shuttle_3_1_semester_times()
+        for bus_id, times in schedule.items():
+            for t in times:
+                m = _hhmm_to_minutes(t)
+                if m is not None:
+                    label = bus_id if bus_id in {"1-1", "2-1"} else "3-1 하리전용"
+                    departures.append((m, label))
+
+    departures = sorted([d for d in departures if d[0] >= cur_min], key=lambda x: x[0])
+    picked = departures[: max(0, int(limit))]
+
+    if not picked:
+        return json.dumps(
+            {
+                "status": "ended",
+                "season": season,
+                "msg": "오늘 운행이 종료되었습니다.",
+                "next": [],
+                "inactive": inactive,
+                "route_base": _SHUTTLE_ROUTE_BASE,
+                "route_market": _SHUTTLE_ROUTE_MARKET,
+                "notice": _SHUTTLE_NOTICE,
+            },
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "status": "success",
+            "season": season,
+            "now": now_dt.strftime("%Y-%m-%d %H:%M"),
+            "inactive": inactive,
+            "next": [{"bus": bus, "time": _minutes_to_hhmm(m)} for m, bus in picked],
+            "route_base": _SHUTTLE_ROUTE_BASE,
+            "route_market": _SHUTTLE_ROUTE_MARKET,
+            "notice": _SHUTTLE_NOTICE,
+        },
+        ensure_ascii=False,
+    )
+
+_KMOU_CAMPUS_MAP: Dict[str, Dict[str, str]] = {
+    "A1": {"kr": "공학2관", "en": "College of Engineering ll"},
+    "A2": {"kr": "해양인문사회과학대학관", "en": "College of Maritime Humanities & Social Sciences"},
+    "A3": {"kr": "대학본부", "en": "University Administration"},
+    "A4": {"kr": "종합연구관", "en": "Research Complex"},
+    "A5": {"kr": "레포츠센터", "en": "Leisure &amp; Sports Center"},
+    "A6": {"kr": "아산관", "en": "Asan Hall"},
+    "A7": {"kr": "케미컬탱커 훈련센터", "en": "Chemical Tanker Training Center"},
+    "A8": {"kr": "체육관", "en": "Gymnasium"},
+    "A9": {"kr": "50주년 기념관", "en": "Half-Century Memorial Hall"},
+    "AP1": {"kr": "중앙로", "en": "Center Street"},
+    "AP2": {"kr": "중앙광장", "en": "Central Square"},
+    "AP3": {"kr": "스포츠존", "en": "Sports Zone"},
+    "AP4": {"kr": "테니스코트", "en": "Tennis Court"},
+    "AP5": {"kr": "남해안로", "en": "South Shore Road"},
+    "B1": {"kr": "공학1관", "en": "College of Engineering I"},
+    "B2": {"kr": "어울림관", "en": "Oullim Hall"},
+    "B3": {"kr": "도서관", "en": "Library"},
+    "B4": {"kr": "미디어홀", "en": "Media Hall"},
+    "B5": {"kr": "한바다호", "en": "T/S Hanbada"},
+    "B6": {"kr": "한나라호", "en": "T/S Hannara"},
+    "BP1": {"kr": "해상교육장", "en": "Marine Education Area"},
+    "BP2": {"kr": "실습선부두", "en": "Wharf for Training Ships"},
+    "BP3": {"kr": "어울림쉼터", "en": "Oullim Park"},
+    "BP4": {"kr": "중앙공원", "en": "Central Park"},
+    "C1": {"kr": "해사대학관", "en": "College of Maritime Sciences"},
+    "C2": {"kr": "평생교육관", "en": "Lifelong Education Center"},
+    "C4": {"kr": "예섬관", "en": "Student Union Hall I"},
+    "C5": {"kr": "다솜관", "en": "Student Union Hall II"},
+    "C6": {"kr": "해사대학 신관", "en": "College of Maritime Sciences"},
+    "CP1": {"kr": "아치잔디공원", "en": "A-chi Green Park"},
+    "CP2": {"kr": "아치뜰", "en": "A-chi Garden"},
+    "CP3": {"kr": "아치해변", "en": "A-chi Beach"},
+    "D1": {"kr": "해양과학기술관", "en": "College of Ocean Science Technology"},
+    "D2": {"kr": "보트보관실", "en": "Boat Storage"},
+    "D3": {"kr": "반도체실험동", "en": "Semiconductor Laboratory"},
+    "D4": {"kr": "시설서비스센터", "en": "United Maintenance Offices"},
+    "D5": {"kr": "대강당", "en": "Grand Auditorium"},
+    "D6": {"kr": "아라관", "en": "Ara Hall"},
+    "D7": {"kr": "공동실험관", "en": "Joint Laboratory Building"},
+    "D8": {"kr": "국제교류협력관", "en": "International Exchange &amp; Cooperation Center"},
+    "DP1": {"kr": "아치나루터", "en": "A-chi Dock"},
+    "DP2": {"kr": "북해안로", "en": "North Shore Road"},
+    "E1": {"kr": "아치관", "en": "A-chi Hall"},
+    "E2": {"kr": "누리관", "en": "Nuri Hall"},
+    "E3": {"kr": "전파암실동", "en": "Electric-wave Darkroom"},
+    "E4": {"kr": "학생군사교육단", "en": "R.O.T.C."},
+    "E5": {"kr": "입지관", "en": "Yipji Hall"},
+}
+
+_KMOU_CAMPUS_MAP_IMAGE_BASE = "https://www.kmou.ac.kr/UserFiles/web/kmou/Campus%20Map/images/sub/"
+
+def _nearest_shuttle_stop_for_code(code: str) -> str:
+    c = (code or "").upper()
+    if c in {"C1", "C6"}:
+        return "해사대학관 앞"
+    if c == "B1":
+        return "공과대학 1호관 앞"
+    if c in {"B2", "B3", "B4"}:
+        return "어울림관"
+    if c == "BP2":
+        return "실습선 부두 방면(앵커탑 인근)"
+    if c.startswith("A"):
+        return "공과대학 1호관 앞"
+    if c.startswith("B") or c.startswith("BP"):
+        return "어울림관"
+    return "해사대학관 앞"
+
+async def get_campus_building_info(query: str):
+    """캠퍼스맵 건물 코드/명칭 검색 + 가장 가까운 셔틀 정류장 안내"""
+    q = (query or "").strip()
+    if not q:
+        return json.dumps({"status": "error", "msg": "검색어가 필요합니다."}, ensure_ascii=False)
+
+    # 코드 우선
+    m = re.search(r"\b([A-Za-z]{1,2}P?\d{1,2})\b", q)
+    code = m.group(1).upper() if m else None
+
+    found_code: Optional[str] = None
+    if code and code in _KMOU_CAMPUS_MAP:
+        found_code = code
+    else:
+        # 한글 명칭 포함 검색
+        for k, v in _KMOU_CAMPUS_MAP.items():
+            if v.get("kr") and v["kr"] in q:
+                found_code = k
+                break
+
+    if not found_code:
+        return json.dumps({"status": "empty", "msg": "해당 건물을 찾지 못했습니다."}, ensure_ascii=False)
+
+    info = _KMOU_CAMPUS_MAP.get(found_code) or {}
+    zone = re.sub(r"\d+.*$", "", found_code)  # A/B/C/D/E/CP/DP...
+    thumb = _KMOU_CAMPUS_MAP_IMAGE_BASE + found_code + ".jpg"
+    return json.dumps(
+        {
+            "status": "success",
+            "code": found_code,
+            "name": info.get("kr"),
+            "name_en": info.get("en"),
+            "zone": zone,
+            "nearest_shuttle_stop": _nearest_shuttle_stop_for_code(found_code),
+            "thumbnail_url": thumb,
+        },
+        ensure_ascii=False,
+    )
 
 # =========================
 # Tool Specification (CRITICAL)
@@ -563,6 +987,33 @@ TOOLS_SPEC = [
             "name": "get_festival_info",
             "description": "🎉 축제/행사: '지금 부산에 하는 축제 있어?' 형태로 부산 축제 정보를 조회합니다.",
             "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_shuttle_next_buses",
+            "description": "🚍 셔틀 시간: 현재 시각 기준 다음 3회 셔틀 출발 정보를 제공합니다(방학/학기 자동 전환).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "가져올 출발 횟수(기본 3)"},
+                    "now_hhmm": {"type": "string", "description": "테스트용 HH:MM(선택)"},
+                    "date_yyyymmdd": {"type": "string", "description": "테스트용 YYYYMMDD(선택)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_campus_building_info",
+            "description": "🗺️ 학교 지도: 건물 코드/명칭(A1, B3 도서관 등)으로 위치 정보를 조회하고, 가장 가까운 셔틀 정류장을 안내합니다.",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string", "description": "예: B3 도서관, A3 대학본부, 도서관"}},
+                "required": ["query"],
+            },
         },
     },
 ]
