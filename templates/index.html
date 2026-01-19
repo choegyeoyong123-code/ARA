@@ -55,7 +55,7 @@
         /* 하단 Dock UI */
         .ara-dock {
             position: fixed;
-            bottom: 85px;
+            bottom: 95px;
             left: 50%;
             transform: translateX(-50%);
             width: 90%;
@@ -64,9 +64,10 @@
             backdrop-filter: blur(10px);
             border-radius: 20px;
             box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-around;
-            padding: 12px 0;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px 6px;
+            padding: 12px 10px;
             z-index: 99;
         }
 
@@ -120,6 +121,34 @@
             font-weight: bold;
             cursor: pointer;
         }
+
+        .feedback-area {
+            position: fixed;
+            bottom: 62px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 400px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            z-index: 100;
+        }
+
+        .feedback-btn {
+            padding: 8px 10px;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            background: rgba(255, 255, 255, 0.95);
+            color: #111827;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .feedback-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
     </style>
 </head>
 
@@ -129,26 +158,35 @@
     </div>
 
     <div class="ara-dock">
-        <div class="dock-item" onclick="send('190 OUT 버스 도착 정보 알려줘')">
+        <div class="dock-item" onclick="send('190번 버스 IN')">
             <span class="dock-icon">🚌</span>
-            <span>시내버스</span>
+            <span>190(학교)</span>
         </div>
-        <div class="dock-item" onclick="send('영도구 가성비 맛집 추천해줘')">
-            <span class="dock-icon">🍱</span>
-            <span>맛집</span>
-        </div>
-        <div class="dock-item" onclick="send('지금 문 연 약국 찾아줘')">
-            <span class="dock-icon">💊</span>
-            <span>약국/병원</span>
-        </div>
-        <div class="dock-item" onclick="send('부산 축제 정보 알려줘')">
-            <span class="dock-icon">🎉</span>
-            <span>축제</span>
+        <div class="dock-item" onclick="send('190번 버스 OUT')">
+            <span class="dock-icon">🚌</span>
+            <span>190(역/대교)</span>
         </div>
         <div class="dock-item" onclick="send('지금 학교 날씨 어때?')">
             <span class="dock-icon">🌤️</span>
             <span>날씨</span>
         </div>
+        <div class="dock-item" onclick="send('영도 착한가격 식당 추천해줘')">
+            <span class="dock-icon">🍚</span>
+            <span>가성비</span>
+        </div>
+        <div class="dock-item" onclick="send('학교 근처 약국이나 병원 알려줘')">
+            <span class="dock-icon">💊</span>
+            <span>약국/병원</span>
+        </div>
+        <div class="dock-item" onclick="send('지금 부산에 하는 축제 있어?')">
+            <span class="dock-icon">🎉</span>
+            <span>축제</span>
+        </div>
+    </div>
+
+    <div class="feedback-area">
+        <button class="feedback-btn" id="likeBtn" onclick="sendFeedback(1)" disabled>👍 좋아요</button>
+        <button class="feedback-btn" id="dislikeBtn" onclick="sendFeedback(-1)" disabled>👎 싫어요</button>
     </div>
 
     <div class="input-area">
@@ -157,6 +195,8 @@
     </div>
 
     <script>
+        let lastConversationId = null;
+
         async function send(text) {
             const inp = document.getElementById('inp');
             const msg = text || inp.value;
@@ -166,6 +206,9 @@
             addMsg('user', msg);
 
             const araMsg = addMsg('ara', '처리 중입니다...');
+            lastConversationId = null;
+            document.getElementById('likeBtn').disabled = true;
+            document.getElementById('dislikeBtn').disabled = true;
 
             try {
                 const res = await fetch('/chat', {
@@ -186,7 +229,12 @@
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
                             const data = JSON.parse(line.slice(6));
-                            fullText += data.content;
+                            if (data.conversation_id) {
+                                lastConversationId = data.conversation_id;
+                                document.getElementById('likeBtn').disabled = false;
+                                document.getElementById('dislikeBtn').disabled = false;
+                            }
+                            fullText += (data.content || "");
                             araMsg.innerHTML = fullText.replace(/\n/g, '<br>');
                             scrollToBottom();
                         }
@@ -194,6 +242,31 @@
                 }
             } catch (e) {
                 araMsg.innerText = "통신 오류가 발생했습니다.";
+            }
+        }
+
+        async function sendFeedback(score) {
+            if (!lastConversationId) {
+                addMsg('ara', '피드백을 전송할 수 없습니다. 먼저 대화를 진행해 주세요.');
+                return;
+            }
+            try {
+                const res = await fetch('/feedback', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        conversation_id: lastConversationId,
+                        user_feedback: score
+                    })
+                });
+                const data = await res.json();
+                if (data && data.ok) {
+                    addMsg('ara', '피드백이 반영되었습니다. 감사합니다.');
+                } else {
+                    addMsg('ara', '피드백을 반영하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+                }
+            } catch (e) {
+                addMsg('ara', '피드백 전송 중 통신 오류가 발생했습니다.');
             }
         }
 
