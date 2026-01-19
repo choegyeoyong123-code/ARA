@@ -86,6 +86,42 @@ def _infer_direction(text: str) -> str | None:
         return "OUT"
     return None
 
+def _norm_utterance(text: str) -> str:
+    """버튼 문구 매칭용 정규화(공백/대소문자/기호 차이를 완화)."""
+    t = (text or "").strip().lower()
+    t = re.sub(r"\s+", "", t)
+    t = t.replace("?", "").replace("!", "").replace(".", "").replace(",", "")
+    return t
+
+def _format_weather_response(payload: dict) -> str:
+    status = payload.get("status")
+    if status != "success":
+        return payload.get("msg") or "날씨 정보를 확인할 수 없습니다."
+
+    w = payload.get("weather") or {}
+    lines = ["요청하신 해양대(영도구 동삼동) 날씨 정보입니다."]
+    if w.get("temp"):
+        lines.append(f"- 기온: {w.get('temp')}")
+    if w.get("time"):
+        lines.append(f"- 기준 시각: {w.get('time')}")
+    if w.get("location"):
+        lines.append(f"- 위치: {w.get('location')}")
+    return "\n".join(lines).strip()
+
+def _format_list_response(title: str, items: list, fields: list[tuple[str, str]]) -> str:
+    if not items:
+        return f"{title} 정보를 확인할 수 없습니다."
+    lines = [title]
+    for it in items[:5]:
+        parts = []
+        for key, label in fields:
+            v = (it or {}).get(key)
+            if v:
+                parts.append(f"{label} {v}")
+        if parts:
+            lines.append("- " + " / ".join(parts))
+    return "\n".join(lines).strip()
+
 def _format_bus_response(payload: dict, bus_number: str | None, direction: str, used_fallback: bool = False) -> str:
     dir_label = "IN(진입)" if direction == "IN" else "OUT(진출)"
     bn = bus_number or ""
@@ -166,6 +202,101 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             examples_lines.append(f"- Q: {q}\n  A: {a}")
         if len(examples_lines) > 1:
             examples_block = "\n" + "\n".join(examples_lines) + "\n"
+
+    # ---------------------
+    # Fast path: 6개 버튼 문구는 OpenAI 우회(즉시 tools 호출)
+    # - 카카오 응답 타임아웃 방지 목적
+    # ---------------------
+    norm = _norm_utterance(user_input)
+    quick_map = {
+        _norm_utterance("지금 학교 날씨 어때?"): ("get_kmou_weather", {}),
+        _norm_utterance("영도 착한가격 식당 추천해줘"): ("get_cheap_eats", {"food_type": ""}),
+        _norm_utterance("학교 근처 약국이나 병원 알려줘"): ("get_medical_info", {"kind": ""}),
+        _norm_utterance("지금 부산에 하는 축제 있어?"): ("get_festival_info", {}),
+    }
+
+    if norm in quick_map:
+        func_name, args = quick_map[norm]
+        try:
+            raw = await TOOL_MAP[func_name](**args) if args else await TOOL_MAP[func_name]()
+            payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except Exception as e:
+            response_text = f"요청을 처리하는 과정에서 오류가 발생했습니다.\n사유: {str(e)}"
+            save_conversation_pair(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_query=user_input,
+                ai_answer=response_text,
+                tools_used=[{"name": func_name, "arguments": args}],
+                user_feedback=0,
+                is_gold_standard=False,
+            )
+            if return_meta:
+                return {"content": response_text, "conversation_id": conversation_id}
+            return response_text
+
+        if isinstance(payload, dict) and payload.get("status") not in (None, "success"):
+            response_text = payload.get("msg") or "요청을 처리했으나, 결과를 확인할 수 없습니다."
+            response_text = _sanitize_response_text_with_context(response_text, user_input)
+            save_conversation_pair(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_query=user_input,
+                ai_answer=response_text,
+                tools_used=[{"name": func_name, "arguments": args}],
+                user_feedback=0,
+                is_gold_standard=False,
+            )
+            if return_meta:
+                return {"content": response_text, "conversation_id": conversation_id}
+            return response_text
+
+        if func_name == "get_kmou_weather":
+            response_text = _format_weather_response(payload)
+        elif func_name == "get_cheap_eats":
+            response_text = _format_list_response(
+                "요청하신 영도 착한가격(가성비) 식당 정보입니다.",
+                payload.get("restaurants") or [],
+                [
+                    ("name", "이름:"),
+                    ("addr", "주소:"),
+                    ("time", "영업:"),
+                    ("menu", "메뉴:"),
+                    ("price", "가격:"),
+                    ("tel", "전화:"),
+                    ("description", "설명:"),
+                    ("recommendation", "추천:"),
+                    ("desc", "설명:"),
+                ],
+            )
+        elif func_name == "get_medical_info":
+            response_text = _format_list_response(
+                "요청하신 학교 근처 약국/병원 정보입니다.",
+                payload.get("hospitals") or [],
+                [("name", "기관:"), ("kind", "종류:"), ("addr", "주소:"), ("tel", "전화:"), ("time", "시간:")],
+            )
+        elif func_name == "get_festival_info":
+            response_text = _format_list_response(
+                "요청하신 부산 축제/행사 정보입니다.",
+                payload.get("festivals") or [],
+                [("title", "제목:"), ("place", "장소:"), ("date", "일정:")],
+            )
+        else:
+            response_text = payload.get("msg") or "요청을 처리했습니다."
+
+        response_text = _sanitize_response_text_with_context(response_text, user_input)
+        save_conversation_pair(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            user_query=user_input,
+            ai_answer=response_text,
+            tools_used=[{"name": func_name, "arguments": args}],
+            user_feedback=0,
+            is_gold_standard=False,
+        )
+        if return_meta:
+            return {"content": response_text, "conversation_id": conversation_id}
+        return response_text
 
     # ---------------------
     # Deterministic bus intent handling (fuzzy + direction inference + fallback)
