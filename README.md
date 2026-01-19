@@ -9,7 +9,7 @@
 
 ARA는 추측하지 않습니다. 부산시와 기상청의 실시간 데이터를 직접 조회하여 답변합니다.
 
-1.  **🚌 Mobility (이동 관제)**: 190번, 101번, 88번 등 교내 진입 시내버스의 **실시간 위치 및 도착 예정 시간** 조회 (부산버스정보시스템).
+1.  **🚌 Mobility (이동 관제)**: 190번, 101번, 88번 등 시내버스 **정류장 실시간 도착 정보** 조회 (ODsay 기반).
 2.  **🍱 Dining (생존 식사)**: 영도구 내 **착한가격업소(가성비 식당)** 및 맛집 추천.
 3.  **💊 Safety (의료 안전)**: 학교 근처 현재 영업 중인 **약국 및 병원** 실시간 조회.
 4.  **🌤️ Environment (기상 대응)**: 해양대 캠퍼스(동삼동)의 **초단기 기상 실황** (기온, 강수 형태) 조회.
@@ -31,3 +31,35 @@ ARA는 추측하지 않습니다. 부산시와 기상청의 실시간 데이터�
 ---
 
 ## 📂 Project Structure (
+
+## 🔐 Environment Variables (필수/선택)
+
+아래 값들은 **반드시 환경 변수로 관리**해야 하며, 코드에 하드코딩하지 않습니다.
+
+- **필수**
+  - `OPENAI_API_KEY`: OpenAI API Key
+  - `ODSAY_API_KEY`: ODsay API Key (버스 기능)
+- **선택(설정 시 기능 활성화)**
+  - `DATA_GO_KR_SERVICE_KEY`: 공공데이터포털 서비스키(날씨/의료/축제/착한가격업소 등)
+  - `PORT`: 서버 포트(기본 8000)
+  - `ARA_CACHE_TTL_SECONDS`: 외부 API 캐시 TTL(기본 60초)
+  - `ARA_HTTPX_VERIFY`: TLS 인증서 검증 여부(`true`/`false`, 기본 `false`)
+
+## 🧭 Bus Tracking (Ocean View)
+
+버스 안내는 OUT/IN 방향을 **명시 입력**으로 받습니다.
+
+- **OUT(진출)**: 구본관 → 방파제입구 → 승선생활관
+- **IN(진입)**: 승선생활관 → 대학본부 → 구본관
+
+예시:
+- `190 OUT 버스 도착 정보 알려줘`
+- `101 IN 버스 언제 와?`
+
+## 📚 Docs Indexing (RAG 성능 최적화)
+
+Cursor의 Docs/Indexing 기능에 아래 공식 문서를 추가하여, 스킬 서버(JSON) 규격 및 API 사용 지침을 빠르게 참조할 수 있도록 합니다.
+
+- Kakao i OpenBuilder: `https://kakao-i-openbuilder.io/docs`
+- OpenAI API: `https://platform.openai.com/docs`
+- Telegram Bot API: `https://core.telegram.org/bots/api`

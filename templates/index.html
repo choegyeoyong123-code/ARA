@@ -125,11 +125,11 @@
 
 <body>
     <div id="chat-box">
-        <div class="message ara">반갑습니다, 선장님! ⚓<br>검증된 데이터로만 모시는 ARA입니다. 무엇을 도와드릴까요?</div>
+        <div class="message ara">안녕하세요. 한국해양대학교(KMOU) 스마트 AI 비서 ARA입니다.<br>검증된 데이터 기반으로 안내드리겠습니다. 무엇을 도와드릴까요?</div>
     </div>
 
     <div class="ara-dock">
-        <div class="dock-item" onclick="send('190번 버스 위치 알려줘')">
+        <div class="dock-item" onclick="send('190 OUT 버스 도착 정보 알려줘')">
             <span class="dock-icon">🚌</span>
             <span>시내버스</span>
         </div>
@@ -165,7 +165,7 @@
             inp.value = '';
             addMsg('user', msg);
 
-            const araMsg = addMsg('ara', 'Thinking...');
+            const araMsg = addMsg('ara', '처리 중입니다...');
 
             try {
                 const res = await fetch('/chat', {
