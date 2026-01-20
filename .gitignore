@@ -20,3 +20,4 @@ Thumbs.db
 # [Data] 만약 로그 파일 등이 생긴다면 무시하고 싶을 때 추가
 history.db
 *.log
+test_api.py

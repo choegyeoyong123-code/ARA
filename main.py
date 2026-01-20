@@ -15,6 +15,12 @@ from fastapi.templating import Jinja2Templates
 import json
 import re
 import time
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler  # type: ignore
+    from apscheduler.triggers.cron import CronTrigger  # type: ignore
+except Exception:  # pragma: no cover
+    AsyncIOScheduler = None  # type: ignore
+    CronTrigger = None  # type: ignore
 
 # 커스텀 모듈은 반드시 load_dotenv() 이후 import
 from database import (
@@ -27,7 +33,7 @@ from database import (
     save_history,
 )
 from agent import ask_ara
-from tools import get_shuttle_next_buses, get_shuttle_schedule
+from tools import get_shuttle_next_buses, get_shuttle_schedule, get_daily_menu, warmup_daily_menu_cache, refresh_daily_menu_cache
 from tools import get_astronomy_data
 from startup_check import run_startup_checks
 
@@ -37,6 +43,7 @@ init_db()
 
 _REQUEST_LANG: contextvars.ContextVar[str] = contextvars.ContextVar("session_lang", default="ko")
 _KST = ZoneInfo("Asia/Seoul")
+_SCHEDULER = None
 
 _HANGUL_RE = re.compile(r"[ㄱ-ㅎ가-힣]")
 _DIGITS_ONLY_RE = re.compile(r"^\d+$")
@@ -139,6 +146,7 @@ def _nav_quick_replies(lang: str) -> list[dict]:
             {"label": "🚌 190 Bus", "action": "message", "messageText": "190 bus"},
             {"label": "🌤️ Weather", "action": "message", "messageText": "weather"},
             {"label": "🚐 Shuttle", "action": "message", "messageText": "shuttle"},
+            {"label": "🍱 Cafeteria", "action": "message", "messageText": "cafeteria menu"},
             {"label": "🏫 Home", "action": "message", "messageText": "home"},
             {"label": "📞 Contact", "action": "message", "messageText": "contact"},
             {"label": "🍚 Food", "action": "message", "messageText": "food"},
@@ -150,6 +158,7 @@ def _nav_quick_replies(lang: str) -> list[dict]:
             {"label": "🚌 190번 버스", "action": "message", "messageText": "190 버스"},
             {"label": "🌤️ 해양대 날씨", "action": "message", "messageText": "영도 날씨"},
             {"label": "🚐 셔틀버스", "action": "message", "messageText": "셔틀 시간"},
+            {"label": "🍱 학식", "action": "message", "messageText": "학식"},
             {"label": "🏫 학교 홈피", "action": "message", "messageText": "KMOU 홈페이지"},
             {"label": "📞 캠퍼스 연락처", "action": "message", "messageText": "캠퍼스 연락처"},
             {"label": "🍚 맛집 추천", "action": "message", "messageText": "맛집"},
@@ -174,6 +183,28 @@ async def startup_diagnostics():
     """
     # Windows(cp949) 콘솔에서는 이모지 출력이 실패할 수 있어 안전장치를 둡니다.
     # 멀티 워커(gunicorn)에서 로그가 4번 찍히지 않도록, temp 파일 락으로 1회만 출력합니다.
+    # 학식 캐시: 서버 시작 시 디스크 캐시를 메모리로 워밍업(원격 호출 없음)
+    try:
+        warmup_daily_menu_cache()
+    except Exception:
+        pass
+
+    # 학식 스케줄러: 매일 04:00(KST)에 1회 갱신(원격 크롤링은 락으로 1회만 수행)
+    global _SCHEDULER
+    try:
+        if _SCHEDULER is None and AsyncIOScheduler is not None and CronTrigger is not None:
+            _SCHEDULER = AsyncIOScheduler(timezone=_KST)
+            _SCHEDULER.add_job(
+                refresh_daily_menu_cache,
+                CronTrigger(hour=4, minute=0, timezone=_KST),
+                id="daily_menu_refresh",
+                replace_existing=True,
+            )
+            _SCHEDULER.start()
+    except Exception:
+        # 스케줄러 실패 시에도 서버는 계속 동작(학식은 기본 문구 반환)
+        pass
+
     lock_path = os.path.join(tempfile.gettempdir(), "ara_startup_logged.lock")
     try:
         fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -294,6 +325,17 @@ def _normalize_desc(s: str) -> str:
     # '- '로 시작하는 라인은 불렛이므로 제거하고 문장 결합
     lines = [re.sub(r"^\-\s+", "", ln) for ln in lines]
     return " / ".join(lines)[:450]
+
+def _normalize_desc_preserve_lines(s: str) -> str:
+    """
+    버스 등 '정확한 줄바꿈 포맷'을 유지해야 하는 description 전용.
+    - 줄바꿈(\n)을 유지합니다.
+    - 마크다운(**)은 그대로 둡니다.
+    """
+    if not s:
+        return ""
+    lines = [ln.strip() for ln in str(s).splitlines() if ln.strip()]
+    return "\n".join(lines)[:450]
 
 def _map_search_link(query: str) -> str:
     q = (query or "").strip()
@@ -610,21 +652,32 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             buttons=[{"action": "message", "label": "다시 선택", "messageText": "약국/병원"}],
         )
 
+    # Cafeteria menu (Signature UI)
+    if ("학식" in msg) or ("식단" in msg) or ("cafeteria" in msg.lower()):
+        from tools import get_cafeteria_menu
+        payload = await get_cafeteria_menu(lang=lang)
+        if isinstance(payload, dict) and isinstance(payload.get("kakao"), dict):
+            return _kakao_response([payload["kakao"]])
+        desc = (payload.get("text") if isinstance(payload, dict) else None) or "🍱 식단 정보를 확인할 수 없습니다."
+        return _kakao_basic_card(
+            title=("Cafeteria Menu" if lang == "en" else "오늘의 학식"),
+            description=_normalize_desc_preserve_lines(str(desc)),
+            buttons=[
+                {"action": "webLink", "label": ("Open KMOU Coop" if lang == "en" else "KMOU Coop 열기"), "webLinkUrl": "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"},
+                {"action": "message", "label": ("Refresh" if lang == "en" else "다시 조회"), "messageText": ("cafeteria menu" if lang == "en" else "학식")},
+            ],
+        )
+
     # Weather
     if ("날씨" in msg) or ("weather" in msg.lower()):
-        raw = await get_kmou_weather(lang=lang)
-        payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
-        if payload.get("status") != "success":
-            return _kakao_basic_card(
-                title="날씨 정보",
-                description=_normalize_desc(payload.get("msg") or "날씨 정보를 확인할 수 없습니다."),
-                buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
-            )
-        w = payload.get("weather") or {}
-        desc = f"기준일자 {w.get('date','')} / 기준시각 {w.get('time','')} / 위치 {w.get('location','')} / 기온 {w.get('temp','')}"
+        from tools import get_weather_info
+        payload = await get_weather_info(lang=lang)
+        if isinstance(payload, dict) and isinstance(payload.get("kakao"), dict):
+            return _kakao_response([payload["kakao"]])
+        desc = (payload.get("text") if isinstance(payload, dict) else None) or "날씨 정보를 확인할 수 없습니다."
         return _kakao_basic_card(
             title=("Weather (Real-time)" if lang == "en" else "해양대 날씨(실황)"),
-            description=_normalize_desc(desc),
+            description=_normalize_desc_preserve_lines(str(desc)),
             buttons=[
                 {"action": "webLink", "label": "기상청", "webLinkUrl": "https://www.weather.go.kr"},
                 {"action": "message", "label": "다시 조회", "messageText": msg},
@@ -687,20 +740,11 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             ],
         )
 
-    # 버스(정류장ID 엄격 매핑은 tools.py에서 적용: 190 IN/OUT)
+    # 버스(정류장ID는 tools.py에서 OUT(03053)로 고정)
     if _is_bus_query(msg):
-        direction = _infer_direction(msg)
         bus_num = _extract_digits(msg) or "190"
-        if direction is None:
-            return _kakao_basic_card(
-                title=("🚌 190 Bus" if lang == "en" else "🚌 190번 버스"),
-                description=("Choose direction." if lang == "en" else "방향을 선택해 주세요."),
-                buttons=[
-                    {"action": "message", "label": ("To Campus" if lang == "en" else "학교행(IN)"), "messageText": ("190 bus IN" if lang == "en" else "190 버스 IN")},
-                    {"action": "message", "label": ("To Nampo/City" if lang == "en" else "남포/시내행(OUT)"), "messageText": ("190 bus OUT" if lang == "en" else "190 버스 OUT")},
-                ],
-            )
-        cache_key = f"bus:{direction}:{bus_num}"
+        direction = "OUT"
+        cache_key = f"bus:{direction}:{bus_num}:{lang}"
         cached = _cache_get(cache_key)
         if cached is not None:
             return cached
@@ -711,63 +755,38 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
 
             async def _prefetch():
                 try:
-                    raw = await get_bus_arrival(bus_number=bus_num, direction=direction, lang=lang)
-                    payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
-                    if payload.get("status") != "success":
-                        card = _kakao_basic_card(
-                            title=(f"🚌 {bus_num} Bus ({direction})" if lang == "en" else f"🚌 {bus_num}번 버스({direction})"),
-                            description=_normalize_desc(payload.get("msg") or ("Unable to fetch bus arrival info." if lang == "en" else "버스 정보를 확인할 수 없습니다.")),
+                    payload = await get_bus_arrival(bus_number=bus_num, direction="OUT", lang=lang)
+                    # tools가 시그니처 UI payload를 제공하면 그대로 사용
+                    if isinstance(payload, dict) and isinstance(payload.get("kakao"), dict):
+                        resp = _kakao_response([payload["kakao"]])
+                    else:
+                        # fallback
+                        text = (payload.get("text") if isinstance(payload, dict) else None) or str(payload or "")
+                        resp = _kakao_basic_card(
+                            title=("🚌 190번(남포행)" if lang != "en" else "🚌 Bus 190 (To City)"),
+                            description=_normalize_desc_preserve_lines(text),
                             buttons=[
                                 {
                                     "action": "message",
                                     "label": ("Retry" if lang == "en" else "다시 조회"),
-                                    "messageText": (f"{bus_num} bus {direction}" if lang == "en" else f"{bus_num} 버스 {direction}"),
+                                    "messageText": (f"{bus_num} bus" if lang == "en" else f"{bus_num} 버스"),
                                 }
                             ],
                         )
-                        _cache_set(cache_key, card)
-                        return
-
-                    stops = payload.get("stops") or []
-                    stop0 = stops[0] if stops else {}
-                    stop_label = (stop0.get("label") or "정류장").strip()
-                    items = []
-                    for b in (stop0.get("buses") or [])[:5]:
-                        bn = (b.get("bus_no") or "").strip()
-                        desc = f"{(b.get('status') or '').strip()} / {(b.get('low_plate') or '').strip()}"
-                        items.append({"title": bn[:50], "description": _normalize_desc(desc), "link": {"web": _map_search_link(stop_label)}})
-                    card = _kakao_list_card(
-                        header_title=(f"{bus_num} Bus {direction} - {stop_label}" if lang == "en" else f"{bus_num}번 {direction} - {stop_label}"),
-                        items=items
-                        or [
-                            {
-                                "title": ("Arrivals" if lang == "en" else "도착 정보"),
-                                "description": ("No arrival info available right now." if lang == "en" else "현재 표시할 수 있는 도착 정보가 없습니다."),
-                                "link": {"web": _map_search_link(stop_label)},
-                            }
-                        ],
-                        buttons=[
-                            {
-                                "action": "message",
-                                "label": ("Retry" if lang == "en" else "다시 조회"),
-                                "messageText": (f"{bus_num} bus {direction}" if lang == "en" else f"{bus_num} 버스 {direction}"),
-                            }
-                        ],
-                    )
-                    _cache_set(cache_key, card)
+                    _cache_set(cache_key, resp)
                 finally:
                     _KAKAO_INFLIGHT.discard(cache_key)
 
             asyncio.create_task(_prefetch())
 
         return _kakao_basic_card(
-            title=(f"🚌 {bus_num} Bus ({direction})" if lang == "en" else f"🚌 {bus_num}번 버스({direction})"),
+            title=(f"🚌 {bus_num} Bus" if lang == "en" else f"🚌 {bus_num}번 버스"),
             description=_t("bridge_desc"),
             buttons=[
                 {
                     "action": "message",
                     "label": ("Retry" if lang == "en" else "다시 조회"),
-                    "messageText": (f"{bus_num} bus {direction}" if lang == "en" else f"{bus_num} 버스 {direction}"),
+                    "messageText": (f"{bus_num} bus" if lang == "en" else f"{bus_num} 버스"),
                 }
             ],
         )
