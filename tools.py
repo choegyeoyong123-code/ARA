@@ -146,13 +146,44 @@ _CAMPUS_CONTACT_DIRECTORY: Dict[str, Dict[str, str]] = {
 def _pretty_key(s: str) -> str:
     return (s or "").replace("_", " ").strip()
 
-def get_campus_contacts(category: Optional[str] = None, office: Optional[str] = None):
+_CONTACT_CATEGORY_KO = {
+    "Emergency": "긴급",
+    "Academic_Affairs": "학사",
+    "Student_Services": "학생지원",
+    "Campus_Facilities": "시설",
+    "Main_Office": "대표",
+}
+
+_CONTACT_OFFICE_KO = {
+    "Integrated_Security_Office": "통합보안실",
+    "Campus_Police_Station": "교내 경찰/치안",
+    "Night_Guard_Office": "야간 경비실",
+    "Academic_Management": "학사관리",
+    "Admissions_Team": "입학팀",
+    "International_Affairs": "국제교류",
+    "Registrar_Office": "학적/제증명",
+    "Student_Support_Team": "학생지원팀",
+    "Scholarship_Office": "장학",
+    "Health_Center": "보건실",
+    "Counseling_Center": "상담센터",
+    "Library_Information": "도서관",
+    "Dormitory_Administration": "기숙사 행정",
+    "Cafeteria_Management": "식당/구내식당",
+    "IT_Support_Center": "IT 지원센터",
+    "KMOU_Representative": "학교 대표번호",
+}
+
+def get_campus_contacts(category: Optional[str] = None, office: Optional[str] = None, lang: str = "ko"):
     """
     오프라인 캠퍼스 연락처 디렉토리(진실 소스: _CAMPUS_CONTACT_DIRECTORY)
     - category=None: 카테고리 목록 반환
     - category 지정: 해당 카테고리의 연락처 목록 반환
     - office 지정: office를 전체 카테고리에서 검색하여 단일 항목 반환
     """
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+
     if office:
         key = (office or "").strip()
         for cat, mp in _CAMPUS_CONTACT_DIRECTORY.items():
@@ -163,22 +194,51 @@ def get_campus_contacts(category: Optional[str] = None, office: Optional[str] = 
                         "mode": "office",
                         "category": cat,
                         "office": key,
-                        "office_label": _pretty_key(key),
+                        "office_label": (_pretty_key(key) if lang == "en" else (_CONTACT_OFFICE_KO.get(key) or _pretty_key(key))),
                         "phone": mp[key],
                     },
                     ensure_ascii=False,
                 )
-        return json.dumps({"status": "empty", "msg": "해당 연락처를 찾지 못했습니다."}, ensure_ascii=False)
+        return json.dumps(
+            {"status": "empty", "msg": ("Contact not found." if lang == "en" else "해당 연락처를 찾지 못했습니다.")},
+            ensure_ascii=False,
+        )
 
     if category:
         cat = (category or "").strip()
         mp = _CAMPUS_CONTACT_DIRECTORY.get(cat)
         if not mp:
-            return json.dumps({"status": "empty", "msg": "해당 분류를 찾지 못했습니다."}, ensure_ascii=False)
-        contacts = [{"office": k, "office_label": _pretty_key(k), "phone": v} for k, v in mp.items()]
-        return json.dumps({"status": "success", "mode": "category", "category": cat, "contacts": contacts}, ensure_ascii=False)
+            return json.dumps(
+                {"status": "empty", "msg": ("Category not found." if lang == "en" else "해당 분류를 찾지 못했습니다.")},
+                ensure_ascii=False,
+            )
+        contacts = [
+            {
+                "office": k,
+                "office_label": (_pretty_key(k) if lang == "en" else (_CONTACT_OFFICE_KO.get(k) or _pretty_key(k))),
+                "phone": v,
+            }
+            for k, v in mp.items()
+        ]
+        return json.dumps(
+            {
+                "status": "success",
+                "mode": "category",
+                "category": cat,
+                "category_label": (_pretty_key(cat) if lang == "en" else (_CONTACT_CATEGORY_KO.get(cat) or _pretty_key(cat))),
+                "contacts": contacts,
+            },
+            ensure_ascii=False,
+        )
 
-    categories = [{"category": c, "category_label": _pretty_key(c), "count": len(mp)} for c, mp in _CAMPUS_CONTACT_DIRECTORY.items()]
+    categories = [
+        {
+            "category": c,
+            "category_label": (_pretty_key(c) if lang == "en" else (_CONTACT_CATEGORY_KO.get(c) or _pretty_key(c))),
+            "count": len(mp),
+        }
+        for c, mp in _CAMPUS_CONTACT_DIRECTORY.items()
+    ]
     return json.dumps({"status": "success", "mode": "categories", "categories": categories}, ensure_ascii=False)
 
 async def get_astronomy_data(target_date: str):
@@ -430,10 +490,19 @@ async def _http_get_json(
 # 1) 날씨 정보 실시간 연동 (기상청 API) — 요청 교정본 반영
 # =========================
 
-async def get_kmou_weather():
-    """한국해양대(영도구 동삼동) 실시간 기상 실황 조회"""
+async def get_kmou_weather(lang: str = "ko"):
+    """한국해양대(영도구 동삼동) 실시간 기상 실황 조회 (lang: ko/en)"""
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
     if not DATA_GO_KR_SERVICE_KEY:
-        return json.dumps({"status": "error", "msg": "기상청 API 키가 없습니다."}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "status": "error",
+                "msg": ("Weather API key (DATA_GO_KR_SERVICE_KEY) is missing." if lang == "en" else "기상청 API 키(DATA_GO_KR_SERVICE_KEY)가 없습니다."),
+            },
+            ensure_ascii=False,
+        )
 
     url = "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getUltraSrtNcst"
     # 요구사항: 시스템 시각과 동기화된 base_time 사용(운영 기본)
@@ -485,12 +554,13 @@ async def get_kmou_weather():
                 if item.get("category") == "PTY":
                     weather_info["state"] = item.get("obsrValue")
 
+            location = "Busan, Yeongdo-gu" if lang == "en" else "부산광역시 영도구"
             return json.dumps(
                 {
                     "status": "success",
                     "weather": {
                         "temp": f"{weather_info.get('temp', 'N/A')}°C",
-                        "location": "부산광역시 영도구",
+                        "location": location,
                         "date": cand_date,
                         "time": cand_time,
                         # raw data 일부를 함께 포함(숫자 근거 제공)
@@ -503,7 +573,13 @@ async def get_kmou_weather():
             last_error = str(e)
             continue
 
-    return json.dumps({"status": "error", "msg": f"날씨 조회 실패: {last_error or 'unknown'}"}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "status": "error",
+            "msg": (f"Weather fetch failed: {last_error or 'unknown'}" if lang == "en" else f"날씨 조회 실패: {last_error or 'unknown'}"),
+        },
+        ensure_ascii=False,
+    )
 
 # =========================
 # 2) 버스 필터링 로직 최적화 (ODsay) — 요청 교정본 반영
@@ -547,23 +623,32 @@ _OCEAN_VIEW_STOPS: Dict[str, List[Dict[str, Any]]] = {
     ],
 }
 
-async def get_bus_arrival(bus_number: str = None, direction: str = None):
+async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: str = "ko"):
     """
     190번 버스 도착정보(정확성 우선)
     - 공공데이터포털(부산BIMS) 기반 우선 조회
     - 정류장 ID(요구사항) 고정:
       IN: 03058 / OUT: 03053
     """
-    if not DATA_GO_KR_SERVICE_KEY:
-        return json.dumps({"status": "error", "msg": "공공데이터 API 키(DATA_GO_KR_SERVICE_KEY)가 없습니다."}, ensure_ascii=False)
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
 
     dir_up = (direction or "").strip().upper()
     if dir_up not in {"OUT", "IN"}:
         return json.dumps(
             {
                 "status": "need_direction",
-                "msg": "버스 동선을 선택해 주세요: OUT(진출) 또는 IN(진입).",
-                "ocean_view": {"OUT": ["구본관", "방파제입구", "승선생활관"], "IN": ["승선생활관", "대학본부", "구본관"]},
+                "msg": (
+                    "Please choose direction: IN (To Campus) or OUT (To Nampo/City)."
+                    if lang == "en"
+                    else "버스 동선을 선택해 주세요: OUT(진출) 또는 IN(진입)."
+                ),
+                "ocean_view": (
+                    {"OUT": ["KMOU Main", "Breakwater Entrance", "Seafarers Dorm"], "IN": ["Seafarers Dorm", "University HQ", "KMOU Main"]}
+                    if lang == "en"
+                    else {"OUT": ["구본관", "방파제입구", "승선생활관"], "IN": ["승선생활관", "대학본부", "구본관"]}
+                ),
             },
             ensure_ascii=False,
         )
@@ -572,7 +657,26 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
     target_bus_num = _extract_digits(bus_number) if bus_number else "190"
 
     station_id = "03058" if dir_up == "IN" else "03053"
-    label = "KMOU Main(03058)" if dir_up == "IN" else "Entrance/Nampo(03053)"
+    direction_label = ("To Campus" if dir_up == "IN" else "To Nampo/City") if lang == "en" else ("학교행" if dir_up == "IN" else "남포/시내행")
+    _STOP_LABELS = {
+        "03058": {"ko": "한국해양대학교본관(학교행)", "en": "KMOU Main (To Campus)"},
+        "03053": {"ko": "해양대입구(남포/시내행)", "en": "KMOU Entrance (To Nampo/City)"},
+    }
+    label = _STOP_LABELS.get(station_id, {}).get(lang) or f"{direction_label} ({station_id})"
+
+    if not DATA_GO_KR_SERVICE_KEY:
+        return json.dumps(
+            {
+                "status": "error",
+                "msg": ("Public data API key (DATA_GO_KR_SERVICE_KEY) is missing." if lang == "en" else "공공데이터 API 키(DATA_GO_KR_SERVICE_KEY)가 없습니다."),
+                "direction": dir_up,
+                "direction_label": direction_label,
+                "bus_number": target_bus_num,
+                "station_id": station_id,
+                "station_label": label,
+            },
+            ensure_ascii=False,
+        )
 
     # 부산BIMS: 정류소 도착정보(ARS번호) 조회
     # - 일부 API는 arsno에서 선행 0을 허용하지 않는 경우가 있어 2회 시도합니다.
@@ -632,8 +736,13 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
         return json.dumps(
             {
                 "status": "error",
-                "msg": "현재 공공데이터(부산BIMS)에서 실시간 버스 도착정보가 비어 있거나 응답하지 않습니다.",
+                "msg": (
+                    "Live bus data is currently not responding (2026-01-20)."
+                    if lang == "en"
+                    else "현재 2026-01-20 실시간 버스 정보가 서버에서 응답하지 않습니다"
+                ),
                 "direction": dir_up,
+                "direction_label": direction_label,
                 "bus_number": target_bus_num,
                 "station_id": station_id,
                 "station_label": label,
@@ -656,14 +765,19 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
             stv = (it.get(st_key) or "").strip()
             if not minv:
                 continue
-            status = f"{minv}분"
-            if stv:
-                status = f"{minv}분 ({stv}정류장 전)"
+            if lang == "en":
+                status = f"{minv} min"
+                if stv:
+                    status = f"{minv} min ({stv} stops away)"
+            else:
+                status = f"{minv}분"
+                if stv:
+                    status = f"{minv}분 ({stv}정류장 전)"
             unfiltered_buses.append(
                 {
                     "bus_no": lineno,
                     "status": status,
-                    "low_plate": "저상" if (it.get(lp_key) or "").strip() == "1" else "일반",
+                    "low_plate": ("Low-floor" if (it.get(lp_key) or "").strip() == "1" else "Standard") if lang == "en" else ("저상" if (it.get(lp_key) or "").strip() == "1" else "일반"),
                 }
             )
 
@@ -674,10 +788,15 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
             {
                 "status": "fallback",
                 "direction": dir_up,
+                "direction_label": direction_label,
                 "bus_number": target_bus_num,
                 "station_id": station_id,
                 "station_label": label,
-                "msg": "요청하신 버스 번호로는 도착 정보를 찾지 못했습니다. 동일 정류장의 근접 도착 정보를 함께 제공합니다.",
+                "msg": (
+                    "No arrivals found for that bus number. Showing nearby arrivals at the same stop."
+                    if lang == "en"
+                    else "요청하신 버스 번호로는 도착 정보를 찾지 못했습니다. 동일 정류장의 근접 도착 정보를 함께 제공합니다."
+                ),
                 "stops": [{"label": label, "station_id": station_id, "status": "success", "buses": []}],
                 "suggestions": [{"label": label, "buses": unfiltered_buses[:5]}],
             },
@@ -688,6 +807,7 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None):
         {
             "status": "success",
             "direction": dir_up,
+            "direction_label": direction_label,
             "bus_number": target_bus_num,
             "stops": [{"label": label, "station_id": station_id, "status": "success", "buses": filtered_buses[:5]}],
         },
@@ -1227,7 +1347,7 @@ _SHUTTLE_ROUTE_MARKET = (
     "릴랙스게이트 → 승선생활관 입구 → 학내진입시 앵커탑 앞에서 좌회전(실습선 부두 방면) → 공대 1호관 후문 → 어울림관 → 학내 종점(해사대학관 앞)"
 )
 
-async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None):
+async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None, lang: str = "ko"):
     """셔틀 다음 N회 출발(시즌 자동 전환 + 실시간 필터)"""
     # 기준 시각(시스템 시계)
     now_dt = datetime.now()
@@ -1243,6 +1363,7 @@ async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None,
         if mm is not None:
             now_dt = now_dt.replace(hour=mm // 60, minute=mm % 60, second=0, microsecond=0)
 
+    lang = (lang or "ko").strip().lower()
     season = get_current_season(now_dt.date())
     is_weekend = now_dt.weekday() >= 5
     # 법정 공휴일 판단은 calendar_2026.json만 사용(계산 금지)
@@ -1266,7 +1387,9 @@ async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None,
     departures: List[Tuple[int, str]] = []
     inactive: List[str] = []
 
+    season_label = None
     if season == "VACATION":
+        season_label = "Winter Vacation Schedule (No. 3-1)" if lang == "en" else "[❄️ 방학중] 3-1 하리전용"
         schedule = _SHUTTLE_VACATION
         if schedule.get("1-1") is None:
             inactive.append("1-1")
@@ -1276,8 +1399,9 @@ async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None,
         for t in times_3:
             m = _hhmm_to_minutes(t)
             if m is not None:
-                departures.append((m, "3-1 하리전용"))
+                departures.append((m, "3-1 (Hari)" if lang == "en" else "3-1 하리전용"))
     else:
+        season_label = "Semester Schedule" if lang == "en" else "[🌸 학기중] 셔틀"
         schedule = dict(_SHUTTLE_SEMESTER)
         # 3-1 학기중 20분 간격
         schedule["3-1"] = _shuttle_3_1_semester_times()
@@ -1285,7 +1409,7 @@ async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None,
             for t in times:
                 m = _hhmm_to_minutes(t)
                 if m is not None:
-                    label = bus_id if bus_id in {"1-1", "2-1"} else "3-1 하리전용"
+                    label = bus_id if bus_id in {"1-1", "2-1"} else ("3-1 (Hari)" if lang == "en" else "3-1 하리전용")
                     departures.append((m, label))
 
     departures = sorted([d for d in departures if d[0] >= cur_min], key=lambda x: x[0])
@@ -1296,6 +1420,7 @@ async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None,
             {
                 "status": "ended",
                 "season": season,
+                "season_label": season_label,
                 "msg": "오늘 운행이 종료되었습니다.",
                 "next": [],
                 "inactive": inactive,
@@ -1310,6 +1435,7 @@ async def get_shuttle_next_buses(limit: int = 3, now_hhmm: Optional[str] = None,
         {
             "status": "success",
             "season": season,
+            "season_label": season_label,
             "now": now_dt.strftime("%Y-%m-%d %H:%M"),
             "inactive": inactive,
             "next": [{"bus": bus, "time": _minutes_to_hhmm(m)} for m, bus in picked],
@@ -1340,6 +1466,7 @@ TOOLS_SPEC = [
                 "properties": {
                     "bus_number": {"type": "string", "description": "예: 190, 101 등(미입력 시 190 기본값)"},
                     "direction": {"type": "string", "enum": ["IN", "OUT"], "description": "IN(진입) 또는 OUT(진출)"},
+                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
                 },
                 "required": ["direction"],
             },
@@ -1350,7 +1477,7 @@ TOOLS_SPEC = [
         "function": {
             "name": "get_kmou_weather",
             "description": "🌤️ Weather: '영도 날씨' 형태로 영도구 실시간 기상 실황을 조회합니다.",
-            "parameters": {"type": "object", "properties": {}},
+            "parameters": {"type": "object", "properties": {"lang": {"type": "string", "description": "ko 또는 en(선택)"}}},
         },
     },
     {
@@ -1403,6 +1530,7 @@ TOOLS_SPEC = [
                     "limit": {"type": "integer", "description": "가져올 출발 횟수(기본 3)"},
                     "now_hhmm": {"type": "string", "description": "테스트용 HH:MM(선택)"},
                     "date_yyyymmdd": {"type": "string", "description": "테스트용 YYYYMMDD(선택)"},
+                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
                 },
             },
         },
@@ -1441,6 +1569,7 @@ TOOLS_SPEC = [
                 "properties": {
                     "category": {"type": "string", "description": "예: Emergency, Academic_Affairs 등(선택)"},
                     "office": {"type": "string", "description": "예: Integrated_Security_Office 등(선택)"},
+                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
                 },
             },
         },
