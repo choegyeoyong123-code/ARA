@@ -4,7 +4,19 @@ import asyncio
 import re
 import uuid
 from openai import AsyncOpenAI
-from tools import TOOLS_SPEC, get_bus_arrival, get_cheap_eats, get_medical_info, get_kmou_weather, get_festival_info
+from tools import (
+    TOOLS_SPEC,
+    get_bus_arrival,
+    get_cheap_eats,
+    get_medical_info,
+    get_kmou_weather,
+    get_festival_info,
+    get_shuttle_next_buses,
+    search_restaurants,
+    get_calendar_day_2026,
+    get_astronomy_data,
+    get_campus_contacts,
+)
 from database import init_db, save_conversation_pair, get_success_examples, get_history, save_history
 
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -15,13 +27,58 @@ TOOL_MAP = {
     "get_cheap_eats": get_cheap_eats,
     "get_medical_info": get_medical_info,
     "get_kmou_weather": get_kmou_weather,
-    "get_festival_info": get_festival_info
+    "get_festival_info": get_festival_info,
+    "get_shuttle_next_buses": get_shuttle_next_buses,
+    "search_restaurants": search_restaurants,
+    "get_calendar_day_2026": get_calendar_day_2026,
+    "get_astronomy_data": get_astronomy_data,
+    "get_campus_contacts": get_campus_contacts,
 }
 
 _BANNED_ADDRESSING_PATTERNS = [
     r"선장님",
     r"\bCaptain\b",
 ]
+
+_LANG_TAG_RE = re.compile(r"^\[LANG:(EN|KO)\]\s*$", flags=re.IGNORECASE)
+
+def _lang_to_tag(lang: str) -> str:
+    return "[LANG:EN]" if (lang or "").strip().lower() == "en" else "[LANG:KO]"
+
+def _lang_from_tag(content: str | None) -> str | None:
+    if not content:
+        return None
+    m = _LANG_TAG_RE.match((content or "").strip())
+    if not m:
+        return None
+    return "en" if m.group(1).upper() == "EN" else "ko"
+
+def _extract_lang_from_history(history: list) -> str | None:
+    # 태그는 history[0]에 유지(안전하게 앞 5개만 확인)
+    for it in (history or [])[:5]:
+        if isinstance(it, dict) and it.get("role") == "system":
+            lang = _lang_from_tag(it.get("content"))
+            if lang:
+                return lang
+    return None
+
+def _strip_lang_tags(history: list) -> list:
+    out = []
+    for it in (history or []):
+        if isinstance(it, dict) and it.get("role") == "system" and _lang_from_tag(it.get("content")):
+            continue
+        out.append(it)
+    return out
+
+def _ensure_lang_tag(history: list, lang: str) -> list:
+    base = _strip_lang_tags(history)
+    return [{"role": "system", "content": _lang_to_tag(lang)}] + base
+
+def _save_history_preserve_lang(user_id: str, history: list, lang: str, limit: int = 20) -> None:
+    # tag + last N non-tag messages
+    base = _strip_lang_tags(history)
+    trimmed = base[-max(0, int(limit)) :]
+    save_history(user_id, [{"role": "system", "content": _lang_to_tag(lang)}] + trimmed)
 
 def _sanitize_response_text(text: str) -> str:
     """최후 안전장치: 금지 호칭/표현을 제거하거나 완화합니다."""
@@ -93,24 +150,35 @@ def _norm_utterance(text: str) -> str:
     t = t.replace("?", "").replace("!", "").replace(".", "").replace(",", "")
     return t
 
-def _format_weather_response(payload: dict) -> str:
+def _format_weather_response(payload: dict, lang: str) -> str:
     status = payload.get("status")
     if status != "success":
+        if (lang or "ko") == "en":
+            return payload.get("msg") or "Unable to fetch weather information."
         return payload.get("msg") or "날씨 정보를 확인할 수 없습니다."
 
     w = payload.get("weather") or {}
-    lines = ["요청하신 해양대(영도구 동삼동) 날씨 정보입니다."]
-    if w.get("temp"):
-        lines.append(f"- 기온: {w.get('temp')}")
-    if w.get("time"):
-        lines.append(f"- 기준 시각: {w.get('time')}")
-    if w.get("location"):
-        lines.append(f"- 위치: {w.get('location')}")
+    if (lang or "ko") == "en":
+        lines = ["Here is the current weather near KMOU (Yeongdo-gu)."]
+        if w.get("temp"):
+            lines.append(f"- Temperature: {w.get('temp')}")
+        if w.get("time"):
+            lines.append(f"- Time (base): {w.get('time')}")
+        if w.get("location"):
+            lines.append(f"- Location: {w.get('location')}")
+    else:
+        lines = ["요청하신 해양대(영도구 동삼동) 날씨 정보입니다."]
+        if w.get("temp"):
+            lines.append(f"- 기온: {w.get('temp')}")
+        if w.get("time"):
+            lines.append(f"- 기준 시각: {w.get('time')}")
+        if w.get("location"):
+            lines.append(f"- 위치: {w.get('location')}")
     return "\n".join(lines).strip()
 
-def _format_list_response(title: str, items: list, fields: list[tuple[str, str]]) -> str:
+def _format_list_response(title: str, items: list, fields: list[tuple[str, str]], lang: str) -> str:
     if not items:
-        return f"{title} 정보를 확인할 수 없습니다."
+        return f"{title} 정보를 확인할 수 없습니다." if (lang or "ko") != "en" else "No verified results found."
     lines = [title]
     for it in items[:5]:
         parts = []
@@ -180,7 +248,7 @@ def _format_bus_response(payload: dict, bus_number: str | None, direction: str, 
             out_lines.append(f"  - {b.get('bus_no','')} / {b.get('status','정보없음')} / {b.get('low_plate','')}")
     return "\n".join(out_lines).strip()
 
-async def ask_ara(user_input, history=None, user_id: str | None = None, return_meta: bool = False):
+async def ask_ara(user_input, history=None, user_id: str | None = None, return_meta: bool = False, session_lang: str = "ko"):
     if history is None:
         if user_id:
             try:
@@ -189,6 +257,18 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
                 history = []
         else:
             history = []
+
+    # 세션 언어 고정: history 태그([LANG:..]) 우선, 없으면 main.py가 전달한 session_lang 사용
+    stored_lang = _extract_lang_from_history(history or [])
+    lang = (stored_lang or (session_lang or "ko")).strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+    history = _ensure_lang_tag(history or [], lang)
+    if user_id and not stored_lang:
+        try:
+            _save_history_preserve_lang(user_id, history, lang, limit=25)
+        except Exception:
+            pass
 
     # DB 초기화(테이블/컬럼 보장)
     init_db()
@@ -224,10 +304,18 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
     if norm in quick_map:
         func_name, args = quick_map[norm]
         try:
+            # tools 로컬라이즈: lang 전달(가능한 함수만)
+            args = dict(args or {})
+            if func_name in {"get_bus_arrival", "get_shuttle_next_buses", "get_kmou_weather", "get_campus_contacts"} and "lang" not in args:
+                args["lang"] = lang
             raw = await TOOL_MAP[func_name](**args) if args else await TOOL_MAP[func_name]()
             payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except Exception as e:
-            response_text = f"요청을 처리하는 과정에서 오류가 발생했습니다.\n사유: {str(e)}"
+            response_text = (
+                f"An error occurred while processing your request.\nReason: {str(e)}"
+                if lang == "en"
+                else f"요청을 처리하는 과정에서 오류가 발생했습니다.\n사유: {str(e)}"
+            )
             save_conversation_pair(
                 conversation_id=conversation_id,
                 user_id=user_id,
@@ -242,7 +330,7 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             return response_text
 
         if isinstance(payload, dict) and payload.get("status") not in (None, "success"):
-            response_text = payload.get("msg") or "요청을 처리했으나, 결과를 확인할 수 없습니다."
+            response_text = payload.get("msg") or ("Unable to fetch results." if lang == "en" else "요청을 처리했으나, 결과를 확인할 수 없습니다.")
             response_text = _sanitize_response_text_with_context(response_text, user_input)
             save_conversation_pair(
                 conversation_id=conversation_id,
@@ -258,10 +346,10 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             return response_text
 
         if func_name == "get_kmou_weather":
-            response_text = _format_weather_response(payload)
+            response_text = _format_weather_response(payload, lang=lang)
         elif func_name == "get_cheap_eats":
             response_text = _format_list_response(
-                "요청하신 영도 착한가격(가성비) 식당 정보입니다.",
+                "요청하신 영도 착한가격(가성비) 식당 정보입니다." if lang != "en" else "Here are Good Price restaurants near Yeongdo/KMOU.",
                 payload.get("restaurants") or [],
                 [
                     ("name", "이름:"),
@@ -274,21 +362,24 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
                     ("recommendation", "추천:"),
                     ("desc", "설명:"),
                 ],
+                lang=lang,
             )
         elif func_name == "get_medical_info":
             response_text = _format_list_response(
-                "요청하신 학교 근처 약국/병원 정보입니다.",
+                "요청하신 학교 근처 약국/병원 정보입니다." if lang != "en" else "Here are pharmacies/hospitals near KMOU.",
                 payload.get("hospitals") or [],
                 [("name", "기관:"), ("kind", "종류:"), ("addr", "주소:"), ("tel", "전화:"), ("time", "시간:")],
+                lang=lang,
             )
         elif func_name == "get_festival_info":
             response_text = _format_list_response(
-                "요청하신 부산 축제/행사 정보입니다.",
+                "요청하신 부산 축제/행사 정보입니다." if lang != "en" else "Here are festival/events in Busan (verified dates only).",
                 payload.get("festivals") or [],
                 [("title", "제목:"), ("place", "장소:"), ("date", "일정:")],
+                lang=lang,
             )
         else:
-            response_text = payload.get("msg") or "요청을 처리했습니다."
+            response_text = payload.get("msg") or ("Done." if lang == "en" else "요청을 처리했습니다.")
 
         response_text = _sanitize_response_text_with_context(response_text, user_input)
         save_conversation_pair(
@@ -316,7 +407,10 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
         if direction is None:
             # '확인 불가' 대신 되묻기
             response_text = (
-                "버스 동선을 확인해야 정확히 안내드릴 수 있습니다.\n"
+                "To provide accurate bus arrivals, please specify direction: IN (To Campus) or OUT (To Nampo/City).\n"
+                "Example: '190 bus IN' or '190 bus OUT'."
+                if lang == "en"
+                else "버스 동선을 확인해야 정확히 안내드릴 수 있습니다.\n"
                 "OUT(진출): 구본관 → 방파제입구 → 승선생활관\n"
                 "IN(진입): 승선생활관 → 대학본부 → 구본관\n"
                 "예) '190 OUT 버스', '101 IN 버스'\n"
@@ -336,10 +430,14 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             return response_text
 
         try:
-            raw = await get_bus_arrival(bus_number=bus_num, direction=direction)
+            raw = await get_bus_arrival(bus_number=bus_num, direction=direction, lang=lang)
             payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         except Exception as e:
-            response_text = f"버스 정보를 조회하는 과정에서 오류가 발생했습니다.\n사유: {str(e)}"
+            response_text = (
+                f"An error occurred while fetching bus arrivals.\nReason: {str(e)}"
+                if lang == "en"
+                else f"버스 정보를 조회하는 과정에서 오류가 발생했습니다.\n사유: {str(e)}"
+            )
             save_conversation_pair(
                 conversation_id=conversation_id,
                 user_id=user_id,
@@ -412,24 +510,44 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
     # OpenAI 키가 없으면(버스 외) 답변 생성 불가
     if client is None:
         return (
-            "현재 `OPENAI_API_KEY` 환경 변수가 설정되지 않아 답변을 생성할 수 없습니다.\n"
+            "OPENAI_API_KEY is not configured, so I cannot generate an LLM response right now.\n"
+            "Bus features may still work via tool routing."
+            if lang == "en"
+            else "현재 `OPENAI_API_KEY` 환경 변수가 설정되지 않아 답변을 생성할 수 없습니다.\n"
             "버스 기능은 사용 가능하며, 그 외 기능은 키 설정 후 이용해 주시기 바랍니다."
         )
 
+    persona = (
+        f"{_lang_to_tag(lang)}\n"
+        + (
+            "You are 'ARA', a smart assistant for Korea Maritime and Ocean University (KMOU) students.\n"
+            "IMPORTANT: Respond ONLY in English.\n"
+            "Always use a polite, professional business tone.\n\n"
+            if lang == "en"
+            else "당신은 한국해양대학교(KMOU) 학생들을 위한 스마트 AI 비서 'ARA'입니다.\n"
+            "중요: 반드시 한국어로만 답변하십시오.\n"
+            "항상 매우 정중하고 전문적인 비즈니스 어조를 사용하십시오.\n\n"
+        )
+    )
+
     system_prompt = {
-        "role": "system", 
+        "role": "system",
         "content": (
-            "당신은 한국해양대학교(KMOU) 학생들을 위한 스마트 AI 비서 'ARA'입니다.\n"
-            "항상 매우 정중하고 전문적인 비즈니스 어조로 한국어로 답변하십시오.\n\n"
-            "## 절대 규칙\n"
-            "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '사용자님' 또는 무호칭입니다.\n"
-            "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 필요한 경우 '확인할 수 없습니다'라고 명시하십시오.\n"
-            "- 숫자/수치 금지 환각: 절대 숫자를 추측하거나 임의로 생성하지 마십시오. 응답에 포함되는 모든 숫자/수치는 반드시 tools.py 도구가 반환한 raw data에서 직접 근거를 가져야 합니다.\n"
-            "- 도구 우선: 버스/날씨/의료/축제/맛집 등 데이터가 필요한 질문은 반드시 제공된 도구를 호출하여 결과를 기반으로 답하십시오.\n"
-            "- raw data 원칙: 도구를 호출한 경우, tools.py가 반환한 raw data(JSON 문자열/객체)만을 근거로 답변하십시오. raw data에 없는 항목(시간, 금액, 개수, 순위 등)을 임의로 만들어내지 마십시오.\n"
-            "- 데이터 실패 시: 도구 결과가 empty/error이면, 실패 사유를 간단히 설명하고 가능한 대안을 제시하되 추측은 금지합니다.\n"
-            "- 데이터 부재 시 응답: 필요한 raw data가 없으면 '모르겠습니다/확인할 수 없습니다'라고 답하십시오.\n"
-            "- 내부 절차 노출 금지: 내부 분석/검증 절차를 사용자에게 단계별로 노출하지 말고 최종 답변만 제공하십시오.\n\n"
+            persona
+            + ("## Absolute rules\n" if lang == "en" else "## 절대 규칙\n")
+            + "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '사용자님' 또는 무호칭입니다.\n"
+            + "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 필요한 경우 '확인할 수 없습니다'라고 명시하십시오.\n"
+            + "- 숫자/수치 금지 환각: 절대 숫자를 추측하거나 임의로 생성하지 마십시오. 응답에 포함되는 모든 숫자/수치는 반드시 tools.py 도구가 반환한 raw data에서 직접 근거를 가져야 합니다.\n"
+            + "- 도구 우선: 버스/날씨/의료/축제/맛집 등 데이터가 필요한 질문은 반드시 제공된 도구를 호출하여 결과를 기반으로 답하십시오.\n"
+            + "- raw data 원칙: 도구를 호출한 경우, tools.py가 반환한 raw data(JSON 문자열/객체)만을 근거로 답변하십시오. raw data에 없는 항목(시간, 금액, 개수, 순위 등)을 임의로 만들어내지 마십시오.\n"
+            + "- 데이터 실패 시: 도구 결과가 empty/error이면, 실패 사유를 간단히 설명하고 가능한 대안을 제시하되 추측은 금지합니다.\n"
+            + "- 데이터 부재 시 응답: 필요한 raw data가 없으면 '모르겠습니다/확인할 수 없습니다'라고 답하십시오.\n"
+            + "- 내부 절차 노출 금지: 내부 분석/검증 절차를 사용자에게 단계별로 노출하지 말고 최종 답변만 제공하십시오.\n\n"
+            "## 날짜/공휴일 진실 소스(Source-of-Truth)\n"
+            "- 공휴일/휴일/연휴/특정 날짜의 행사 여부 등 '날짜 기반' 정보는 절대 계산하거나 추측하지 마십시오.\n"
+            "- 반드시 tools.py의 `get_calendar_day_2026` 또는 `get_astronomy_data`를 호출해 확인된 값만 사용하십시오.\n"
+            "- 해당 날짜가 `calendar_2026.json`에 없거나 도구가 success가 아니면, 다음 문구로만 답하십시오:\n"
+            "  - Data is currently being updated for this specific date.\n\n"
             "## 버튼 입력 우선 처리\n"
             "- 사용자가 버튼(퀵플라이)을 통해 입력한 메시지는 최우선적으로 해당 기능 호출 의도로 간주하십시오.\n"
             "- 예: '190번 버스 IN/OUT', '지금 학교 날씨 어때?', '영도 착한가격 식당 추천해줘', '학교 근처 약국이나 병원 알려줘', '지금 부산에 하는 축제 있어?'\n\n"
@@ -450,7 +568,8 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
         )
     }
     
-    messages = [system_prompt] + history + [{"role": "user", "content": user_input}]
+    # LLM에는 태그를 system_prompt에만 주입하고, history의 태그 메시지는 제거하여 토큰 낭비를 줄입니다.
+    messages = [system_prompt] + _strip_lang_tags(history) + [{"role": "user", "content": user_input}]
 
     try:
         response = await client.chat.completions.create(
@@ -469,6 +588,9 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             for tc in msg.tool_calls:
                 func_name = tc.function.name
                 args = json.loads(tc.function.arguments)
+                # tools 로컬라이즈: lang 전달(가능한 함수만)
+                if func_name in {"get_bus_arrival", "get_shuttle_next_buses", "get_kmou_weather", "get_campus_contacts"} and "lang" not in args:
+                    args["lang"] = lang
                 if func_name in TOOL_MAP:
                     tasks.append(TOOL_MAP[func_name](**args) if args else TOOL_MAP[func_name]())
                     tools_used.append({"name": func_name, "arguments": args})
@@ -490,7 +612,7 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             if user_id:
                 try:
                     new_history = (history or []) + [{"role": "user", "content": user_input}, {"role": "assistant", "content": response_text}]
-                    save_history(user_id, new_history[-20:])
+                    _save_history_preserve_lang(user_id, new_history, lang, limit=25)
                 except Exception:
                     pass
             save_conversation_pair(
@@ -510,7 +632,7 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
         if user_id:
             try:
                 new_history = (history or []) + [{"role": "user", "content": user_input}, {"role": "assistant", "content": response_text}]
-                save_history(user_id, new_history[-20:])
+                _save_history_preserve_lang(user_id, new_history, lang, limit=25)
             except Exception:
                 pass
         save_conversation_pair(
