@@ -9,3 +9,5 @@ requests
 xmltodict
 lxml
 openai
+jinja2
+aiofiles
