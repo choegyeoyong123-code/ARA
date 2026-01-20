@@ -6,16 +6,11 @@ import os
 import re
 import time
 import asyncio
-import tempfile
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import quote_plus
 
 import httpx
-try:
-    from bs4 import BeautifulSoup  # type: ignore
-except Exception:  # pragma: no cover
-    BeautifulSoup = None  # type: ignore
 from zoneinfo import ZoneInfo
 
 # =========================
@@ -88,21 +83,6 @@ def _kakao_item_card(
         "buttons": (buttons or [])[:3],
         "buttonLayout": "horizontal",
     }
-
-# =========================
-# Cafeteria Daily Menu Cache (KMOU Coop)
-# - 크롤링 실패/최초 실행 전 기본 문구(요구사항)
-# =========================
-
-# Default message in case crawling fails or before first run
-DAILY_MENU_CACHE = "🍱 아직 식단 정보가 업데이트되지 않았습니다. (잠시 후 다시 시도해주세요)"
-_DAILY_MENU_CACHE_DATE: Optional[str] = None  # YYYY-MM-DD
-_DAILY_MENU_CACHE_UPDATED_AT: Optional[str] = None  # ISO timestamp (KST)
-_DAILY_MENU_CACHE_SOURCE: str = "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"
-
-# 멀티 워커 환경에서 "하루 1회(04:00)만" 원격 크롤링을 보장하기 위한 디스크 기반 동기화(내부 구현)
-_DAILY_MENU_SHARED_FILE = os.path.join(tempfile.gettempdir(), "ara_daily_menu_cache.json")
-_DAILY_MENU_LOCK_FILE = os.path.join(tempfile.gettempdir(), "ara_daily_menu_cache.lock")
 
 # =========================
 # 공통 유틸
@@ -589,318 +569,7 @@ def _reference_datetime() -> datetime:
         return datetime(int(d[0:4]), int(d[4:6]), int(d[6:8]), int(t[0:2]), int(t[2:4]), tzinfo=_KST)
     except Exception:
         return datetime.now(_KST)
-
-def _load_daily_menu_cache_from_disk() -> None:
-    """
-    멀티 워커/재시작 대비:
-    - 원격 크롤링은 1회만 수행하고, 결과를 디스크에 저장해 다른 프로세스는 읽어 사용합니다.
-    - (외부 요구사항은 '메모리 캐시'지만, 중복 크롤링 방지용 내부 구현입니다.)
-    """
-    global DAILY_MENU_CACHE, _DAILY_MENU_CACHE_DATE, _DAILY_MENU_CACHE_UPDATED_AT
-    try:
-        if not os.path.exists(_DAILY_MENU_SHARED_FILE):
-            return
-        with open(_DAILY_MENU_SHARED_FILE, "r", encoding="utf-8") as f:
-            payload = json.load(f)
-        if not isinstance(payload, dict):
-            return
-        menu = payload.get("menu")
-        cache_date = payload.get("date")
-        updated_at = payload.get("updated_at")
-        if isinstance(menu, str) and menu.strip():
-            DAILY_MENU_CACHE = menu.strip()
-            _DAILY_MENU_CACHE_DATE = str(cache_date) if cache_date else _DAILY_MENU_CACHE_DATE
-            _DAILY_MENU_CACHE_UPDATED_AT = str(updated_at) if updated_at else _DAILY_MENU_CACHE_UPDATED_AT
-    except Exception:
-        return
-
-def _save_daily_menu_cache_to_disk(menu: str, cache_date: str, updated_at: str) -> None:
-    try:
-        payload = {
-            "date": cache_date,
-            "updated_at": updated_at,
-            "source": _DAILY_MENU_CACHE_SOURCE,
-            "menu": menu,
-        }
-        with open(_DAILY_MENU_SHARED_FILE, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-    except Exception:
-        return
-
-def _try_acquire_daily_menu_lock() -> bool:
-    try:
-        fd = os.open(_DAILY_MENU_LOCK_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.close(fd)
-        return True
-    except FileExistsError:
-        return False
-    except Exception:
-        return False
-
-def _release_daily_menu_lock() -> None:
-    try:
-        os.remove(_DAILY_MENU_LOCK_FILE)
-    except Exception:
-        pass
-
-def _parse_menu_table_columns(table) -> Dict[str, List[str]]:
-    """
-    KMOU Coop 식단 테이블 파싱(열 기반)
-    - 해당 페이지의 table은 <tr> 없이 <thead><th>.. 와 <tbody><td>.. 형태로 구성됨
-    - thead의 th 텍스트를 header로, tbody의 td를 column 값으로 매핑합니다.
-    """
-    out: Dict[str, List[str]] = {}
-    try:
-        thead = table.find("thead")
-        tbody = table.find("tbody")
-        if thead is None or tbody is None:
-            return out
-        headers = [th.get_text(" ", strip=True) for th in thead.find_all("th")]
-        headers = [h for h in headers if h]
-        cols = [td.get_text("\n", strip=True) for td in tbody.find_all("td")]
-        cols = [c for c in cols if c is not None]
-        if not headers or not cols:
-            return out
-        for idx, h in enumerate(headers):
-            v = cols[idx] if idx < len(cols) else ""
-            lines = [ln.strip() for ln in str(v).splitlines() if ln.strip()]
-            if h:
-                out[h] = lines
-    except Exception:
-        return out
-    return out
-
-async def _crawl_kmou_daily_menu() -> str:
-    """
-    KMOU Coop '오늘의 식단' 페이지에서 식단을 크롤링하여 문자열로 반환합니다.
-    - 웹 크롤링은 하루 1회(04:00 KST)만 수행되도록 스케줄러에서 호출합니다.
-    """
-    url = _DAILY_MENU_CACHE_SOURCE
-    timeout_s = float(os.environ.get("ARA_MENU_TIMEOUT_SECONDS", "8.0"))
-    async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
-        res = await client.get(url, timeout=timeout_s)
-    res.raise_for_status()
-    html = res.text or ""
-    if BeautifulSoup is None:
-        raise RuntimeError("beautifulsoup4 is not installed")
-    soup = BeautifulSoup(html, "html.parser")
-
-    tables = soup.select("table.detail_tb") or soup.find_all("table")
-    meal_table = None
-    corner_table = None
-
-    for t in tables:
-        txt = t.get_text(" ", strip=True)
-        if ("조식" in txt) and ("중식" in txt) and ("석식" in txt):
-            meal_table = t
-        if ("양식코너" in txt) or ("라면코너" in txt) or ("분식코너" in txt):
-            corner_table = t
-
-    today = _reference_datetime().strftime("%Y-%m-%d")
-    lines: List[str] = [f"🍱 **오늘의 학식** ({today})"]
-
-    if meal_table is not None:
-        cols = _parse_menu_table_columns(meal_table)
-        lines.append("🍚 **학생식당(조/중/석식)**")
-        for k in ["조식", "중식", "석식"]:
-            parts = cols.get(k) or []
-            parts = [p for p in parts if p]
-            if parts:
-                lines.append(f"- {k}: " + " / ".join(parts))
-        # fallback: 예상 키가 없으면 원문 출력
-        if not cols:
-            raw = meal_table.get_text("\n", strip=True)
-            if raw:
-                lines.append(raw)
-
-    if corner_table is not None:
-        cols2 = _parse_menu_table_columns(corner_table)
-        lines.append("🍜 **코너 메뉴**")
-        for k in ["양식코너", "라면코너", "분식코너", "정식"]:
-            parts = cols2.get(k) or []
-            parts = [p for p in parts if p]
-            if parts:
-                lines.append(f"- {k}: " + " / ".join(parts))
-        if not cols2:
-            raw2 = corner_table.get_text("\n", strip=True)
-            if raw2:
-                lines.append(raw2)
-
-    # 테이블을 못 찾으면 안전하게 기본 문구
-    if len(lines) <= 1:
-        return DAILY_MENU_CACHE
-    return "\n".join(lines)[:1800]
-
-async def refresh_daily_menu_cache() -> None:
-    """
-    하루 1회(04:00 KST) 실행되는 캐시 갱신 작업.
-    - 원격 크롤링은 1회만 수행(락 파일)
-    - 다른 프로세스는 디스크 캐시를 로드하여 메모리 캐시를 갱신
-    """
-    global DAILY_MENU_CACHE, _DAILY_MENU_CACHE_DATE, _DAILY_MENU_CACHE_UPDATED_AT
-
-    now = _reference_datetime()
-    today = now.strftime("%Y-%m-%d")
-
-    # 이미 오늘 캐시가 메모리에 있으면 종료
-    if _DAILY_MENU_CACHE_DATE == today and DAILY_MENU_CACHE and DAILY_MENU_CACHE != "🍱 아직 식단 정보가 업데이트되지 않았습니다. (잠시 후 다시 시도해주세요)":
-        return
-
-    # 디스크에 오늘 데이터가 있으면 로드만
-    _load_daily_menu_cache_from_disk()
-    if _DAILY_MENU_CACHE_DATE == today and DAILY_MENU_CACHE:
-        return
-
-    # 락 획득 성공한 프로세스만 원격 크롤링 수행
-    if not _try_acquire_daily_menu_lock():
-        # 다른 프로세스가 갱신 중일 수 있으므로 로드 시도 후 종료
-        _load_daily_menu_cache_from_disk()
-        return
-
-    try:
-        print("[ARA Log] Daily menu crawling started")
-        menu = await _crawl_kmou_daily_menu()
-        updated_at = now.isoformat(timespec="seconds")
-        DAILY_MENU_CACHE = (menu or "").strip() or DAILY_MENU_CACHE
-        _DAILY_MENU_CACHE_DATE = today
-        _DAILY_MENU_CACHE_UPDATED_AT = updated_at
-        _save_daily_menu_cache_to_disk(DAILY_MENU_CACHE, today, updated_at)
-        print("[ARA Log] Daily menu crawling success")
-    except Exception as e:
-        print(f"[ARA Log] Daily menu crawling failed: {str(e)}")
-        # 실패 시: 기존 캐시 유지(없으면 기본 문구)
-        _load_daily_menu_cache_from_disk()
-    finally:
-        _release_daily_menu_lock()
-
-async def get_daily_menu(lang: str = "ko"):
-    """
-    오늘의 학식(캐시 조회)
-    - 원격 크롤링을 트리거하지 않습니다(하루 1회 04:00 스케줄러만 갱신).
-    - 빠른 응답을 위해 메모리 캐시를 우선 사용하고, 필요 시 디스크 캐시를 로드합니다.
-    """
-    lang = (lang or "ko").strip().lower()
-    if lang not in {"ko", "en"}:
-        lang = "ko"
-    _load_daily_menu_cache_from_disk()
-    now = _reference_datetime()
-    today = now.strftime("%Y-%m-%d")
-    status = "success" if (_DAILY_MENU_CACHE_DATE == today and DAILY_MENU_CACHE) else "pending"
-    msg = DAILY_MENU_CACHE
-    if lang == "en":
-        # 영어 모드에서도 데이터 원문은 한국어일 수 있으므로 최소한의 안내만 번역
-        if status != "success":
-            msg = "🍱 Cafeteria menu is not updated yet. Please try again later."
-    return json.dumps(
-        {
-            "status": status,
-            "date": _DAILY_MENU_CACHE_DATE,
-            "updated_at": _DAILY_MENU_CACHE_UPDATED_AT,
-            "msg": msg,
-        },
-        ensure_ascii=False,
-    )
-
-def _truncate_one_line(s: str, max_len: int = 38) -> str:
-    t = re.sub(r"\s+", " ", (s or "").strip())
-    if not t:
-        return ""
-    if len(t) <= max_len:
-        return t
-    return t[: max(0, max_len - 1)] + "…"
-
-async def get_cafeteria_menu(lang: str = "ko") -> Dict[str, Any]:
-    """
-    오늘의 학식(ItemCard payload)
-    - 원격 크롤링을 트리거하지 않습니다(하루 1회 04:00 스케줄러만 갱신).
-    - 캐시가 없으면 기본 문구를 반환합니다.
-    """
-    lang = (lang or "ko").strip().lower()
-    if lang not in {"ko", "en"}:
-        lang = "ko"
-
-    _load_daily_menu_cache_from_disk()
-    now = _reference_datetime()
-    today = now.strftime("%Y-%m-%d")
-    status = "success" if (_DAILY_MENU_CACHE_DATE == today and DAILY_MENU_CACHE) else "pending"
-    full = (DAILY_MENU_CACHE or "").strip() or DAILY_MENU_CACHE
-
-    # 요약 추출(페이지 구조상 2개 테이블: 학생식당/코너메뉴 → '어울림/기숙사'로 매핑)
-    lines = [ln.strip() for ln in str(full).splitlines() if ln.strip()]
-    lunch = next((ln for ln in lines if ln.startswith("- 중식:")), "")
-    dinner = next((ln for ln in lines if ln.startswith("- 석식:")), "")
-    corner = (
-        next((ln for ln in lines if ln.startswith("- 양식코너:")), "")
-        or next((ln for ln in lines if ln.startswith("- 라면코너:")), "")
-        or next((ln for ln in lines if ln.startswith("- 분식코너:")), "")
-    )
-
-    # 구버전 캐시(불릿 없이 '조식/중식/석식'만 있는 형태) 폴백 파싱
-    def _pick_block(marker: str) -> str:
-        try:
-            idx = lines.index(marker)
-        except ValueError:
-            return ""
-        out: List[str] = []
-        for ln in lines[idx + 1 : idx + 8]:
-            if ln in {"조식", "중식", "석식"}:
-                break
-            out.append(ln)
-        return " / ".join(out)
-
-    if not lunch and "중식" in lines:
-        block = _pick_block("중식")
-        if block:
-            lunch = f"중식: {block}"
-    if not dinner and "석식" in lines:
-        block = _pick_block("석식")
-        if block:
-            dinner = f"석식: {block}"
-    if not corner and any(k in lines for k in ["양식코너", "라면코너", "분식코너", "정식"]):
-        # 코너는 첫 번째로 발견되는 항목 + 뒤의 메뉴를 한 줄로
-        for k in ["양식코너", "라면코너", "분식코너", "정식"]:
-            if k in lines:
-                block = _pick_block(k)
-                if block:
-                    corner = f"{k}: {block}"
-                break
-
-    menu_summary_1 = _truncate_one_line(
-        (lunch or dinner or full)
-        .replace("- 중식:", "중식:")
-        .replace("- 석식:", "석식:")
-    )
-    menu_summary_2 = _truncate_one_line(
-        (corner or full)
-        .replace("- 양식코너:", "양식:")
-        .replace("- 라면코너:", "라면:")
-        .replace("- 분식코너:", "분식:")
-    )
-
-    if lang == "en" and status != "success":
-        menu_summary_1 = "Not updated yet"
-        menu_summary_2 = "Please try again later"
-
-    card = _kakao_item_card(
-        thumbnail_text="TODAY MENU",
-        head_title="오늘의 학식",
-        head_desc=(_DAILY_MENU_CACHE_DATE or today),
-        items=[
-            ("🏫 어울림", menu_summary_1 or "정보 없음"),
-            ("🏠 기숙사", menu_summary_2 or "정보 없음"),
-        ],
-        buttons=[
-            {"label": "KMOU Coop", "action": "webLink", "webLinkUrl": _DAILY_MENU_CACHE_SOURCE},
-            {"label": "새로고침", "action": "message", "messageText": ("cafeteria menu" if lang == "en" else "학식")},
-        ],
-    )
-
-    text = f"{EMOJI_FOOD} 오늘의 학식({_DAILY_MENU_CACHE_DATE or today})\n- 어울림: {menu_summary_1}\n- 기숙사: {menu_summary_2}"
-    return {"status": status, "date": _DAILY_MENU_CACHE_DATE, "updated_at": _DAILY_MENU_CACHE_UPDATED_AT, "kakao": {"itemCard": card}, "text": text}
-
-def warmup_daily_menu_cache() -> None:
-    """서버 시작 시 디스크 캐시를 메모리로 로드(원격 호출 없음)."""
-    _load_daily_menu_cache_from_disk()
+    # NOTE: 학식 메뉴 크롤링/캐시 로직은 요구사항에 따라 폐기되었습니다.
 
 def _extract_ymd(date_text: str) -> Optional[datetime]:
     """문자열에서 YYYYMMDD(또는 YYYY-MM-DD/YY년MM월DD일 등) 추출. 불확실하면 None."""
@@ -1120,17 +789,17 @@ def _fmt_num(x: float) -> str:
     s = f"{v:.1f}"
     return s.rstrip("0").rstrip(".")
 
-async def get_weather_info(lang: str = "ko") -> Dict[str, Any]:
+async def get_weather_info(lang: str = "ko") -> str:
     """
-    풍속 포함 날씨 요약(카카오 ItemCard payload 반환)
-    - 우선: OpenWeatherMap 표준 응답(있다면)을 사용합니다.
-    - 폴백: 기존 날씨 소스(get_kmou_weather)의 raw 데이터를 OpenWeatherMap 키 구조로 매핑하여 사용합니다.
-    - 안전 추출: data.get("wind", {}).get("speed", 0.0), data.get("main", {}).get("feels_like", ...)
+    영도 날씨(풍속 포함) — UI는 main.py에서 카드로 구성
+    - 반환: json 문자열
+    - 안정성: OpenWeatherMap(있으면) → KMA(get_kmou_weather) 폴백
     """
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+
     try:
-        lang = (lang or "ko").strip().lower()
-        if lang not in {"ko", "en"}:
-            lang = "ko"
         data: Dict[str, Any] = {}
 
         # 1) OpenWeatherMap(있다면) 사용 — free API에서 보장되는 필드만 사용
@@ -1143,56 +812,36 @@ async def get_weather_info(lang: str = "ko") -> Dict[str, Any]:
                     "lon": str(_KMOU_LON),
                     "appid": owm_key,
                     "units": "metric",
-                    "lang": "kr",
                 }
                 async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
                     res = await client.get(url, params=params, timeout=5.0)
                 res.raise_for_status()
                 data = res.json() or {}
             except Exception:
-                # OWM 실패 시 KMA 폴백
                 data = {}
 
-        # 2) KMA(get_kmou_weather) 폴백 → OpenWeatherMap 형태로 매핑
+        # 2) KMA 폴백
         if not data:
-            raw = await get_kmou_weather(lang="ko")
+            raw = await get_kmou_weather(lang=lang)
             payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
             if not isinstance(payload, dict) or payload.get("status") != "success":
-                msg = "날씨 정보를 가져오지 못했습니다. 잠시 후 다시 시도해주세요."
-                return {
-                    "status": "error",
-                    "msg": msg,
-                    "kakao": {
-                        "itemCard": _kakao_item_card(
-                            thumbnail_text="BUSAN WEATHER",
-                            head_title="오늘의 영도 날씨",
-                            head_desc=msg,
-                            items=[],
-                            buttons=[{"label": "기상청 예보", "action": "webLink", "webLinkUrl": "https://www.weather.go.kr"}],
-                        )
-                    },
-                    "text": msg,
-                }
-
+                return json.dumps(
+                    {"status": "error", "msg": "날씨 정보를 확인 중입니다."},
+                    ensure_ascii=False,
+                )
             w = payload.get("weather") or {}
             raw_weather = w.get("raw") if isinstance(w, dict) else {}
             if not isinstance(raw_weather, dict):
                 raw_weather = {}
+            # 기상청 실황: 체감온도 없음 → temp로 폴백
+            data = {
+                "main": {
+                    "temp": raw_weather.get("temp"),
+                    "feels_like": raw_weather.get("temp"),
+                },
+                "wind": {"speed": raw_weather.get("wind_speed")},
+            }
 
-            # 기존 응답(raw)에서 숫자 안전 추출(풍속/체감온도는 없을 수 있음)
-            try:
-                temp = float(raw_weather.get("temp") or 0.0)
-            except Exception:
-                temp = 0.0
-            # 기상청 실황에는 체감온도가 없으므로 temp로 폴백(요구사항: 안전 추출)
-            feels_like = temp
-            try:
-                wind_speed = float(raw_weather.get("wind_speed") or 0.0)
-            except Exception:
-                wind_speed = 0.0
-            data = {"wind": {"speed": wind_speed}, "main": {"temp": temp, "feels_like": feels_like}}
-
-        # 요구사항: .get() 기반 안전 추출(없으면 기본값)
         main = data.get("main") if isinstance(data, dict) else {}
         wind = data.get("wind") if isinstance(data, dict) else {}
         if not isinstance(main, dict):
@@ -1200,102 +849,48 @@ async def get_weather_info(lang: str = "ko") -> Dict[str, Any]:
         if not isinstance(wind, dict):
             wind = {}
 
-        wind_speed_val = float(wind.get("speed", 0.0) or 0.0)
-        temp_val = float(main.get("temp", 0.0) or 0.0)
-        feels_like_val = float(main.get("feels_like", temp_val) or temp_val)
+        temp = float(main.get("temp") or 0.0)
+        feels = float(main.get("feels_like") or temp)
+        wind_speed = float(wind.get("speed") or 0.0)
+        wind_text = _wind_intensity_desc_ko(wind_speed)
 
-        desc = _wind_intensity_desc_ko(wind_speed_val)
-        head_desc = f"{EMOJI_WEATHER} 바람 {desc} · {_fmt_num(wind_speed_val)}m/s"
-        card = _kakao_item_card(
-            thumbnail_text="BUSAN WEATHER",
-            head_title="오늘의 영도 날씨",
-            head_desc=head_desc,
-            items=[
-                ("🌡️ 온도", f"{_fmt_num(temp_val)}°C (체감 {_fmt_num(feels_like_val)}°C)"),
-                ("🌬️ 바람", f"{_fmt_num(wind_speed_val)}m/s ({desc})"),
-            ],
-            buttons=[{"label": "기상청 예보", "action": "webLink", "webLinkUrl": "https://www.weather.go.kr"}],
-        )
-        text = (
-            f"{EMOJI_WEATHER} 현재 부산 영도 날씨\n"
-            f"🌡️ 온도: {_fmt_num(temp_val)}°C (체감 {_fmt_num(feels_like_val)}°C)\n"
-            f"🌬️ 바람: {_fmt_num(wind_speed_val)}m/s ({desc})"
-        )
-        return {
-            "status": "success",
-            "temp": temp_val,
-            "feels_like": feels_like_val,
-            "wind_speed": wind_speed_val,
-            "wind_text": desc,
-            "kakao": {"itemCard": card},
-            "text": text,
-        }
-    except Exception:
-        msg = "날씨 정보를 가져오지 못했습니다. 잠시 후 다시 시도해주세요."
-        return {
-            "status": "error",
-            "msg": msg,
-            "kakao": {
-                "itemCard": _kakao_item_card(
-                    thumbnail_text="BUSAN WEATHER",
-                    head_title="오늘의 영도 날씨",
-                    head_desc=msg,
-                    items=[],
-                    buttons=[{"label": "기상청 예보", "action": "webLink", "webLinkUrl": "https://www.weather.go.kr"}],
-                )
+        return json.dumps(
+            {
+                "status": "success",
+                "temp": temp,
+                "feels_like": feels,
+                "wind_speed": wind_speed,
+                "wind_text": wind_text,
             },
-            "text": msg,
-        }
+            ensure_ascii=False,
+        )
+    except Exception:
+        return json.dumps({"status": "error", "msg": "날씨 정보를 확인 중입니다."}, ensure_ascii=False)
 
 # =========================
 # 2) 버스 필터링 로직 최적화 (ODsay) — 요청 교정본 반영
 # =========================
 
-async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: str = "ko") -> Dict[str, Any]:
+async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: str = "ko") -> str:
     """
-    190번 버스 도착정보(OUT 고정) — ARA Signature UI(Carousel)
-    - OUT(03053) 기준
-    - 반환: dict(JSON)로 카카오 `carousel(type=itemCard)` payload 포함
+    190번 버스 도착정보(OUT 고정 / 03053)
+    - UI는 main.py에서 BasicCard/ListCard로 구성(요구사항: BasicCard thumbnail 제거)
+    - 반환: json 문자열
     """
     lang = (lang or "ko").strip().lower()
     if lang not in {"ko", "en"}:
         lang = "ko"
 
-    def _bus_signature_carousel(min1_desc: str, min2_desc: str, head_desc: str) -> Dict[str, Any]:
-        bus_card = _kakao_item_card(
-            thumbnail_text="190 BUS",
-            head_title="190번 (남포행)",
-            head_desc=head_desc,
-            items=[
-                ("1️⃣ 도착", min1_desc),
-                ("2️⃣ 다음", min2_desc),
-            ],
-            buttons=[{"label": "새로고침", "action": "message", "messageText": "190번 버스"}],
-        )
-        shuttle_card = _kakao_item_card(
-            thumbnail_text="SHUTTLE",
-            head_title="교내 셔틀버스",
-            head_desc="현재 운행 정보",
-            items=[
-                ("상행", "운행 중"),
-                ("하행", "5분 뒤 도착"),
-            ],
-            buttons=[{"label": "셔틀 시간", "action": "message", "messageText": "셔틀 시간"}],
-        )
-        return {"carousel": {"type": "itemCard", "items": [bus_card, shuttle_card]}}
-
     # 190만 지원
     req_num = _extract_digits(bus_number) if bus_number else "190"
     if req_num and req_num != "190":
-        msg = "현재는 190번 버스만 지원합니다."
-        return {"status": "error", "msg": msg, "kakao": _bus_signature_carousel("정보 없음", "정보 없음", "해양대 정문 정류장"), "text": msg}
+        return json.dumps({"status": "error", "msg": "현재는 190번 버스만 지원합니다."}, ensure_ascii=False)
 
     # OUT 고정: 해양대입구(남포/시내행)
     station_id = "03053"
 
     if not DATA_GO_KR_SERVICE_KEY:
-        msg = "공공데이터 API 키(DATA_GO_KR_SERVICE_KEY)가 없습니다."
-        return {"status": "error", "msg": msg, "kakao": _bus_signature_carousel("정보 없음", "정보 없음", "해양대 정문 정류장"), "text": msg}
+        return json.dumps({"status": "error", "msg": "공공데이터 API 키(DATA_GO_KR_SERVICE_KEY)가 없습니다."}, ensure_ascii=False)
 
     target_bus_num = "190"
 
@@ -1385,13 +980,14 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: s
 
     # 200인데 데이터가 비면: 운행 중 버스 없음(요구사항 문구)
     if (last_status_code == 200) and ("<resultCode>00</resultCode>" in (last_xml_text or "")) and (not items):
-        msg = "현재 운행 중인 190번 버스가 없습니다 (차고지 대기 중)"
-        return {"status": "empty", "msg": msg, "kakao": _bus_signature_carousel("정보 없음", "정보 없음", "해양대 정문 정류장"), "text": msg}
+        return json.dumps({"status": "empty", "msg": "현재 운행 중인 190번 버스가 없습니다 (차고지 대기 중)"}, ensure_ascii=False)
 
     if not items:
         # 공공데이터 장애/비정상 응답(보수적 문구)
-        msg = "현재 2026-01-20 실시간 버스 정보가 서버에서 응답하지 않습니다"
-        return {"status": "error", "msg": msg, "detail": last_err or "empty", "kakao": _bus_signature_carousel("정보 없음", "정보 없음", "해양대 정문 정류장"), "text": msg}
+        return json.dumps(
+            {"status": "error", "msg": "현재 2026-01-20 실시간 버스 정보가 서버에서 응답하지 않습니다", "detail": last_err or "empty"},
+            ensure_ascii=False,
+        )
 
     # 190번: bus1(다음) + bus2(다다음) 추출
     found_190: Optional[Dict[str, Any]] = None
@@ -1402,16 +998,14 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: s
         break
 
     if not found_190:
-        msg = "현재 운행 중인 190번 버스가 없습니다 (차고지 대기 중)"
-        return {"status": "empty", "msg": msg, "kakao": _bus_signature_carousel("정보 없음", "정보 없음", "해양대 정문 정류장"), "text": msg}
+        return json.dumps({"status": "empty", "msg": "현재 운행 중인 190번 버스가 없습니다 (차고지 대기 중)"}, ensure_ascii=False)
 
     b1 = found_190.get("bus1") if isinstance(found_190, dict) else None
     b2 = found_190.get("bus2") if isinstance(found_190, dict) else None
 
     # 다음 버스(min1) 없으면: 운행 없음으로 처리
     if (not isinstance(b1, dict)) or (not str(b1.get("min") or "").strip()):
-        msg = "현재 운행 중인 190번 버스가 없습니다 (차고지 대기 중)"
-        return {"status": "empty", "msg": msg, "kakao": _bus_signature_carousel("정보 없음", "정보 없음", "해양대 정문 정류장"), "text": msg}
+        return json.dumps({"status": "empty", "msg": "현재 운행 중인 190번 버스가 없습니다 (차고지 대기 중)"}, ensure_ascii=False)
 
     min1 = str(b1.get("min") or "").strip()
     st1 = str(b1.get("stop") or "").strip() or "?"
@@ -1422,21 +1016,488 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: s
         min2 = str(b2.get("min") or "").strip()
         st2 = str(b2.get("stop") or "").strip()
 
-    kakao_payload = _bus_signature_carousel(f"{min1}분 후", (f"{min2}분 후" if min2 else "정보 없음"), "해양대 정문 정류장")
-    text = (
-        f"{EMOJI_BUS} 190번(남포행) 해양대 정문\n"
-        f"1) {min1}분 후 ({st1}정거장)\n"
-        f"2) {(min2 if min2 else '정보 없음')}분 후 ({st2 if st2 else '—'}정거장)"
+    return json.dumps(
+        {
+            "status": "success",
+            "line": "190",
+            "direction": "OUT",
+            "station_id": station_id,
+            "station_label": "해양대입구(남포/시내행)",
+            "bus1": {"min": min1, "stop": st1},
+            "bus2": {"min": (min2 or None), "stop": (st2 or None)},
+        },
+        ensure_ascii=False,
     )
+
+# =========================
+# 2-1) 190 버스 트래커 (ARA_190_Bus_Tracker)
+# - getBusLocation() 응답(= items 배열)을 검증하여 실시간 위치를 제공
+# - items가 비었거나(또는 좌표 누락) 검증 불가이면 출발(운행) 시간표 로직으로 폴백
+# =========================
+
+# 운행 시간(첫차/막차) — 공개 정보 기반 기본값(환경변수로 오버라이드 가능)
+_BUS_190_FIRST_BUS_HHMM = (os.environ.get("ARA_BUS_190_FIRST_BUS_HHMM") or "04:55").strip()
+_BUS_190_LAST_BUS_HHMM = (os.environ.get("ARA_BUS_190_LAST_BUS_HHMM") or "21:50").strip()
+
+# 실시간 위치 API(프로젝트 외부 연동용)
+# - 이 레포에는 "부산 BIMS 차량별 GPS" 공식 엔드포인트가 포함되어 있지 않아, URL/파라미터는 환경변수로 주입합니다.
+_BUS_190_LOCATION_URL = (os.environ.get("ARA_BUS_190_LOCATION_URL") or "").strip()
+_BUS_190_LOCATION_TIMEOUT_SECONDS = float(os.environ.get("ARA_BUS_190_LOCATION_TIMEOUT_SECONDS") or "2.5")
+_BUS_190_LOCATION_AUTH = (os.environ.get("ARA_BUS_190_LOCATION_AUTH") or "").strip()  # 예: "Bearer xxx"
+_BUS_190_LOCATION_PARAMS_JSON = (os.environ.get("ARA_BUS_190_LOCATION_PARAMS_JSON") or "").strip()  # 예: {"routeNo":"190"}
+
+# 190번 주요 정류장명(검증용) — 공개된 노선 안내(웹)에서 확보한 "주요 정류장" 기반
+# NOTE: 실제 API의 bstopNm 표기는 괄호/중점/공백 등이 다를 수 있으므로 정규화 비교합니다.
+_ROUTE_190_STATIONS_KO: List[str] = [
+    "해양대구본관",
+    "해양대방파제입구",
+    "해양대승선생활관",
+    "해양대입구",
+    "에덴금호아파트",
+    "동삼혁신지구입구",
+    "동삼국민은행앞교차로",
+    "동삼시장",
+    "일동미라주아파트",
+    "동삼삼거리",
+    "동삼주공",
+    "영도구청",
+    "청학주유소",
+    "청학동부산은행",
+    "SK부산저유소",
+    "HJ중공업",
+    "한성맨션",
+    "교통순찰대 센트럴에일린의뜰",
+    "교통순찰대·센트럴 에일린의뜰",
+    "해동병원",
+    "영도우체국",
+    "대교동",
+    "영도대교 남포역",
+    "영도대교·남포역",
+    "부산데파트",
+    "중앙역 부산우체국",
+    "중앙역·부산우체국",
+    "영주동",
+    "부산역",
+    "초량시장입구",
+    "부산고교",
+    "화신아파트",
+    "동일파크맨션",
+    "영주삼거리",
+    "시민아파트",
+]
+
+def _norm_bstop_name(name: str) -> str:
+    s = str(name or "")
+    # 괄호 내용 제거(예: "해양대입구(남포/시내행)" → "해양대입구")
+    s = re.sub(r"\([^)]*\)", "", s)
+    # 중점/구분자 제거
+    s = s.replace("·", " ").replace("•", " ")
+    # 공백 제거
+    s = re.sub(r"\s+", "", s)
+    # 한글/영문/숫자만 남김(비교 안정화)
+    s = re.sub(r"[^0-9A-Za-z가-힣_]", "", s)
+    return s.lower()
+
+_ROUTE_190_STATIONS_NORM = {_norm_bstop_name(x) for x in _ROUTE_190_STATIONS_KO if x}
+
+def _as_float(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return float(str(v).strip())
+    except Exception:
+        return None
+
+def _extract_items_from_bus_location_payload(payload: Any) -> List[Dict[str, Any]]:
+    """
+    getBusLocation() 응답에서 items 배열 추출.
+    - 요구사항: API 'items' array 검증. 비었거나 None이면 [] 반환.
+    """
+    if payload is None:
+        return []
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except Exception:
+            return []
+    if not isinstance(payload, dict):
+        return []
+
+    items = payload.get("items", None)
+    # 흔한 중첩 케이스도 보수적으로 지원
+    if items is None:
+        items = _safe_get(payload, "response", "body", "items", default=None)
+    if items is None:
+        items = _safe_get(payload, "response", "body", "items", "item", default=None)
+
+    # 단일 dict → list로 승격
+    if isinstance(items, dict):
+        if "item" in items and isinstance(items.get("item"), list):
+            items = items.get("item")
+        else:
+            items = [items]
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        if isinstance(it, dict):
+            out.append(it)
+    return out
+
+async def _get_bus_190_location_api_payload() -> Any:
+    """
+    외부 위치 API 호출.
+    - 이 레포에서는 URL/파라미터를 강제하지 않고 환경변수로만 주입합니다.
+    - URL이 없으면 items=[]로 취급되어 시간표 폴백으로 진행됩니다.
+    """
+    if not _BUS_190_LOCATION_URL:
+        return {"items": []}
+
+    params: Dict[str, Any] = {}
+    if _BUS_190_LOCATION_PARAMS_JSON:
+        try:
+            parsed = json.loads(_BUS_190_LOCATION_PARAMS_JSON)
+            if isinstance(parsed, dict):
+                params = parsed
+        except Exception:
+            params = {}
+
+    extra_headers: Dict[str, str] = {}
+    if _BUS_190_LOCATION_AUTH:
+        extra_headers["Authorization"] = _BUS_190_LOCATION_AUTH
+
+    try:
+        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers={**HEADERS, **extra_headers}) as client:
+            res = await client.get(_BUS_190_LOCATION_URL, params=params, timeout=_BUS_190_LOCATION_TIMEOUT_SECONDS)
+        res.raise_for_status()
+        # JSON 우선
+        try:
+            return res.json()
+        except Exception:
+            # JSON이 아니면 안전하게 실패 처리(좌표 환각 금지)
+            return {"items": []}
+    except Exception:
+        return {"items": []}
+
+def _bus_190_departure_schedule_payload(now_dt: datetime) -> Dict[str, Any]:
+    """
+    items가 없을 때의 폴백(운행 시간표/운행종료 판단).
+    - anti_hallucination_rules: current_time > last_bus_time → SERVICE_ENDED
+    """
+    first_m = _hhmm_to_minutes(_BUS_190_FIRST_BUS_HHMM)
+    last_m = _hhmm_to_minutes(_BUS_190_LAST_BUS_HHMM)
+    cur_m = now_dt.hour * 60 + now_dt.minute
+
+    # 안전장치: 시간표 파싱 실패 시 보수적으로 "확인 중"
+    if first_m is None or last_m is None:
+        return {
+            "status": "ACTIVE",
+            "data": {
+                "bus_id": None,
+                "location": {"lat": None, "lng": None},
+                "remaining_time": None,
+                "message": "DEPARTURE_SCHEDULE: 190번 버스 운행 시간표 데이터가 올바르지 않아 확인 중입니다.",
+            },
+        }
+
+    if cur_m > last_m:
+        return {
+            "status": "ENDED",
+            "data": {
+                "bus_id": None,
+                "location": {"lat": None, "lng": None},
+                "remaining_time": None,
+                "message": "SERVICE_ENDED",
+            },
+        }
+
+    if cur_m < first_m:
+        remain = first_m - cur_m
+        return {
+            "status": "PRE_DEPARTURE",
+            "data": {
+                "bus_id": None,
+                "location": {"lat": None, "lng": None},
+                "remaining_time": f"{remain}분",
+                "message": f"DEPARTURE_SCHEDULE: 첫차({_BUS_190_FIRST_BUS_HHMM})까지 약 {remain}분 남았습니다. (막차 {_BUS_190_LAST_BUS_HHMM})",
+            },
+        }
+
+    # 운행 시간 내이지만 위치 데이터가 없을 수 있음(차고지 대기/서버 미응답 등)
     return {
-        "status": "success",
-        "line": "190",
-        "station_id": station_id,
-        "bus1": {"min": min1, "stop": st1},
-        "bus2": {"min": min2 or None, "stop": st2 or None},
-        "kakao": kakao_payload,
-        "text": text,
+        "status": "ACTIVE",
+        "data": {
+            "bus_id": None,
+            "location": {"lat": None, "lng": None},
+            "remaining_time": None,
+            "message": f"DEPARTURE_SCHEDULE: 현재 실시간 위치 데이터(items)가 없어 운행 시간만 안내합니다. (첫차 {_BUS_190_FIRST_BUS_HHMM} / 막차 {_BUS_190_LAST_BUS_HHMM})",
+        },
     }
+
+async def get_bus_190_tracker(now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None) -> str:
+    """
+    ARA_190_Bus_Tracker
+    - step_1: getBusLocation() 응답 파싱
+    - step_2:
+      - items 존재 + 좌표 유효: REAL_TIME_TRACKING
+      - items 비어있음/무효: DEPARTURE_SCHEDULE(운행시간/운행종료)
+    반환: output_template 준수(JSON 문자열)
+    """
+    # 기준 시각(KST, 테스트 오버라이드 지원)
+    now_dt = _reference_datetime()
+    if date_yyyymmdd:
+        digits = re.sub(r"\D+", "", str(date_yyyymmdd))
+        if len(digits) == 8:
+            try:
+                now_dt = datetime(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]), now_dt.hour, now_dt.minute, tzinfo=_KST)
+            except Exception:
+                pass
+    if now_hhmm:
+        mm = _hhmm_to_minutes(now_hhmm)
+        if mm is not None:
+            now_dt = now_dt.replace(hour=mm // 60, minute=mm % 60, second=0, microsecond=0)
+
+    payload = await _get_bus_190_location_api_payload()
+    items = _extract_items_from_bus_location_payload(payload)
+
+    # items 검증 실패/빈 배열 → 시간표 폴백
+    if not items:
+        return json.dumps(_bus_190_departure_schedule_payload(now_dt), ensure_ascii=False)
+
+    # items가 있어도 좌표가 null/파싱 불가이면 환각 금지 → 시간표 폴백
+    candidates: List[Dict[str, Any]] = []
+    for it in items:
+        lat = _as_float(it.get("lat") if isinstance(it, dict) else None)
+        lon = _as_float(it.get("lon") if isinstance(it, dict) else None)
+        if lat is None:
+            lat = _as_float(it.get("latitude") if isinstance(it, dict) else None)
+        if lon is None:
+            lon = _as_float(it.get("lng") if isinstance(it, dict) else None)
+        if lon is None:
+            lon = _as_float(it.get("longitude") if isinstance(it, dict) else None)
+
+        if lat is None or lon is None:
+            continue
+
+        car_no = (it.get("carNo") or it.get("car_no") or it.get("bus_id") or it.get("id")) if isinstance(it, dict) else None
+        bstop_nm = (it.get("bstopNm") or it.get("bstopnm") or it.get("stopName") or it.get("bstop_name")) if isinstance(it, dict) else None
+
+        verified_stop = False
+        if bstop_nm:
+            verified_stop = _norm_bstop_name(str(bstop_nm)) in _ROUTE_190_STATIONS_NORM
+
+        candidates.append(
+            {
+                "lat": float(lat),
+                "lon": float(lon),
+                "carNo": str(car_no) if car_no is not None else None,
+                "bstopNm": str(bstop_nm) if bstop_nm is not None else None,
+                "verified_stop": bool(verified_stop),
+            }
+        )
+
+    if not candidates:
+        return json.dumps(_bus_190_departure_schedule_payload(now_dt), ensure_ascii=False)
+
+    # 검증된 정류장명을 우선 선택(없으면 첫 후보)
+    picked = next((c for c in candidates if c.get("verified_stop") is True), candidates[0])
+    ver_txt = "OK" if picked.get("verified_stop") else "FAIL"
+    stop_txt = picked.get("bstopNm") or "알 수 없음"
+    bus_id = picked.get("carNo")
+
+    out = {
+        "status": "ACTIVE",
+        "data": {
+            "bus_id": bus_id,
+            "location": {"lat": picked["lat"], "lng": picked["lon"]},
+            "remaining_time": None,
+            "message": f"REAL_TIME_TRACKING: 차량 {bus_id or '미상'} / 정류장 {stop_txt} (정류장명 검증: {ver_txt})",
+        },
+    }
+    return json.dumps(out, ensure_ascii=False)
+
+async def get_bus_190_tracker_busbusinfo(line_id: str = "5200190000", kmou_stop_id: str = "04001") -> str:
+    import xml.etree.ElementTree as ET
+
+    now_dt = _reference_datetime()
+    last_updated = now_dt.isoformat(timespec="seconds")
+
+    if not DATA_GO_KR_SERVICE_KEY:
+        return json.dumps(
+            {
+                "status": "ENDED",
+                "realtime_buses": [],
+                "departure_info": {"eta_minutes": None, "message": "정보 없음"},
+                "last_updated": last_updated,
+            },
+            ensure_ascii=False,
+        )
+
+    loc_url = "http://apis.data.go.kr/6260000/BusBusInfoService/getBusLocationList"
+    arr_url = "http://apis.data.go.kr/6260000/BusBusInfoService/getBusArrivalList"
+    timeout_s = float(os.environ.get("ARA_BUS_190_TIMEOUT_SECONDS", "2.5"))
+    start_radius_m = float(os.environ.get("ARA_BUS_190_START_RADIUS_M", "5000"))
+
+    def _xml_ok(xml_text: str) -> bool:
+        try:
+            root = ET.fromstring(xml_text or "")
+        except Exception:
+            return False
+        code = (root.findtext(".//resultCode") or "").strip()
+        return code in {"00", "0"}
+
+    def _parse_items(xml_text: str) -> List[Dict[str, str]]:
+        try:
+            root = ET.fromstring(xml_text or "")
+        except Exception:
+            return []
+        out: List[Dict[str, str]] = []
+        for items_el in root.findall(".//items"):
+            for it in items_el.findall("./item"):
+                d: Dict[str, str] = {}
+                for child in list(it):
+                    if child.tag and child.text is not None:
+                        d[child.tag] = child.text
+                if d:
+                    out.append(d)
+            if out:
+                break
+        return out
+
+    def _pick_first(d: Dict[str, Any], keys: List[str]) -> Optional[str]:
+        for k in keys:
+            v = d.get(k)
+            if v is None:
+                continue
+            s = str(v).strip()
+            if s:
+                return s
+        return None
+
+    async def _call_xml(url: str, params: Dict[str, Any]) -> str:
+        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
+            res = await client.get(url, params=params, timeout=timeout_s)
+        res.raise_for_status()
+        return res.text or ""
+
+    async def _fetch_locations() -> List[Dict[str, Any]]:
+        line = (line_id or "").strip()
+        if not line:
+            return []
+        candidates = [
+            {"serviceKey": DATA_GO_KR_SERVICE_KEY, "lineId": line},
+            {"serviceKey": DATA_GO_KR_SERVICE_KEY, "lineid": line},
+            {"serviceKey": DATA_GO_KR_SERVICE_KEY, "line_id": line},
+        ]
+        xml_text = ""
+        for p in candidates:
+            try:
+                xml_text = await _call_xml(loc_url, p)
+                if _xml_ok(xml_text):
+                    items = _parse_items(xml_text)
+                    if items:
+                        break
+            except Exception:
+                continue
+        items = _parse_items(xml_text) if (_xml_ok(xml_text) and xml_text) else []
+        buses: List[Dict[str, Any]] = []
+        for it in items:
+            car = _pick_first(it, ["carNo", "carno", "car_no", "vehId", "vhclNo", "busNo"])
+            lat = _as_float(_pick_first(it, ["lat", "gpsLat", "y", "gpsy", "posY", "latitude"]))
+            lon = _as_float(_pick_first(it, ["lng", "lon", "x", "gpsx", "posX", "longitude"]))
+            if lat is None or lon is None:
+                continue
+            buses.append({"carNo": (car or None), "lat": float(lat), "lng": float(lon)})
+        return buses
+
+    async def _fetch_departure_eta() -> Optional[int]:
+        stop_id = (kmou_stop_id or "").strip()
+        if not stop_id:
+            return None
+        candidates = [
+            {"serviceKey": DATA_GO_KR_SERVICE_KEY, "bstopid": stop_id},
+            {"serviceKey": DATA_GO_KR_SERVICE_KEY, "bstopId": stop_id},
+            {"serviceKey": DATA_GO_KR_SERVICE_KEY, "bstop_id": stop_id},
+        ]
+        xml_text = ""
+        for p in candidates:
+            try:
+                xml_text = await _call_xml(arr_url, p)
+                if _xml_ok(xml_text):
+                    items = _parse_items(xml_text)
+                    if items:
+                        break
+            except Exception:
+                continue
+        items = _parse_items(xml_text) if (_xml_ok(xml_text) and xml_text) else []
+        if not items:
+            return None
+
+        target_line = (line_id or "").strip()
+        picked: Optional[Dict[str, str]] = None
+        for it in items:
+            line_val = _pick_first(it, ["lineId", "lineid", "line_id", "routeId", "routeid", "route_id", "lineno", "lineNo", "routeno"])
+            if target_line and line_val and str(line_val).strip() == target_line:
+                picked = it
+                break
+        if picked is None:
+            picked = items[0]
+
+        raw_min = _pick_first(picked, ["min1", "remainMin", "remain_min", "eta", "arrtime", "arrTime", "time"])
+        if not raw_min:
+            return None
+        digits = re.sub(r"\D+", "", str(raw_min))
+        if not digits:
+            return None
+        try:
+            return int(digits)
+        except Exception:
+            return None
+
+    realtime = await _fetch_locations()
+    any_near = False
+    for b in realtime:
+        near, _ = _is_near_kmou(b.get("lat"), b.get("lng"), radius_m=start_radius_m)
+        if near:
+            any_near = True
+            break
+
+    eta_min = None
+    if (not realtime) or (not any_near):
+        eta_min = await _fetch_departure_eta()
+    else:
+        eta_min = await _fetch_departure_eta()
+
+    first_m = _hhmm_to_minutes(_BUS_190_FIRST_BUS_HHMM)
+    last_m = _hhmm_to_minutes(_BUS_190_LAST_BUS_HHMM)
+    cur_m = now_dt.hour * 60 + now_dt.minute
+
+    if eta_min is not None:
+        dep_msg = f"출발 예정 {eta_min}분"
+    else:
+        if last_m is not None and cur_m > last_m:
+            dep_msg = "운행 종료"
+        else:
+            dep_msg = "정보 없음"
+
+    if eta_min is not None and ((not realtime) or (not any_near)):
+        status = "PRE_DEPARTURE"
+    elif realtime:
+        status = "ACTIVE"
+    else:
+        status = "ENDED" if dep_msg == "운행 종료" else "ENDED"
+
+    return json.dumps(
+        {
+            "status": status,
+            "realtime_buses": [{"carNo": b.get("carNo"), "lat": b.get("lat"), "lng": b.get("lng")} for b in realtime],
+            "departure_info": {"eta_minutes": eta_min, "message": dep_msg},
+            "last_updated": last_updated,
+        },
+        ensure_ascii=False,
+    )
 
 # =========================
 # 3) 맛집/의료/축제 (기존 기능 유지)
@@ -1552,14 +1613,36 @@ async def search_restaurants(query: str, limit: int = 5):
 
     limit_n = max(1, min(int(limit or 5), 10))
 
+    def _addr_is_yeongdo(addr: str) -> bool:
+        a = (addr or "").strip()
+        if not a:
+            return False
+        al = a.lower()
+        # Kakao 주소는 보통 "부산 영도구 ..." 형태
+        return ("영도구" in a) or ("yeongdo-gu" in al) or ("yeongdo gu" in al) or ("yeongdo" in al and "busan" in al)
+
     kakao_key = (os.environ.get("KAKAO_REST_API_KEY") or "").strip()
     if kakao_key:
         try:
             url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-            # 영도/해양대 인근 결과를 유도(검색 쿼리만 보강; 결과는 좌표/주소로 재검증)
-            query2 = f"{q} 영도"
+            # 영도구 결과를 유도(검색 쿼리만 보강; 결과는 좌표/주소로 재검증)
+            query2 = f"{q} 영도구"
+            # 영도구 전체를 커버하도록 반경 확대(중심: KMOU)
+            radius_m = int(os.environ.get("ARA_KAKAO_YEONGDO_RADIUS_M", "20000"))
+            radius_m = max(1000, min(radius_m, 20000))
             async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers={"Authorization": f"KakaoAK {kakao_key}"}) as client:
-                res = await client.get(url, params={"query": query2, "size": str(limit_n)}, timeout=2.5)
+                # 필터링으로 0건이 될 수 있어 size는 여유 있게 요청
+                res = await client.get(
+                    url,
+                    params={
+                        "query": query2,
+                        "x": str(_KMOU_LON),
+                        "y": str(_KMOU_LAT),
+                        "radius": str(radius_m),
+                        "size": "15",
+                    },
+                    timeout=2.5,
+                )
                 res.raise_for_status()
                 data = res.json()
 
@@ -1576,11 +1659,11 @@ async def search_restaurants(query: str, limit: int = 5):
                 except Exception:
                     lat, lon = None, None
 
-                near, dist_m = _is_near_kmou(lat, lon, radius_m=5000.0)
-                # 지오펜싱(엄격): KMOU 반경 5km + (주소가 있을 경우) 영도구 키워드
+                # 지오펜싱(요구사항): 부산광역시 영도구 내만 허용 (좌표는 검색/필터에만 사용)
+                near, dist_m = _is_near_kmou(lat, lon, radius_m=float(radius_m))
                 if not near:
                     continue
-                if addr and ("영도구" not in addr) and ("영도" not in addr):
+                if not _addr_is_yeongdo(addr):
                     continue
 
                 out.append(
@@ -1608,6 +1691,14 @@ async def search_restaurants(query: str, limit: int = 5):
     try:
         path = os.path.join(os.path.dirname(__file__), "places.csv")
         if not os.path.exists(path):
+            # 최후 폴백: 승인된 사용자 제보(관리자 검수 후)에서만 검색
+            try:
+                from database import search_approved_contributions
+                contrib = search_approved_contributions(q, limit=limit_n)
+                if contrib:
+                    return json.dumps({"status": "success", "query": q, "restaurants": contrib}, ensure_ascii=False)
+            except Exception:
+                pass
             return json.dumps({"status": "empty", "msg": "로컬 places.csv를 찾지 못했습니다."}, ensure_ascii=False)
 
         with open(path, "r", encoding="utf-8", newline="") as f:
@@ -1635,7 +1726,7 @@ async def search_restaurants(query: str, limit: int = 5):
 
             # 위치 근거가 텍스트에 포함될 때만 통과(무환각)
             # - 좌표가 없으므로 '영도/해양대' 등 근거 문자열이 없으면 폐기
-            if not any(k in desc for k in ["영도", "영도구", "해양대", "동삼동", "흰여울"]):
+            if not any(k in desc for k in ["영도구", "영도", "해양대", "동삼동", "흰여울"]):
                 continue
 
             out.append({"name": name, "category": cat, "description": desc, "recommendation": rec, "source": "places.csv"})
@@ -1643,12 +1734,20 @@ async def search_restaurants(query: str, limit: int = 5):
                 break
 
         if not out:
-            return json.dumps({"status": "empty", "msg": "조건에 맞는 영도/해양대 인근 맛집을 찾지 못했습니다."}, ensure_ascii=False)
+            # 최후 폴백: 승인된 사용자 제보(관리자 검수 후)에서만 검색
+            try:
+                from database import search_approved_contributions
+                contrib = search_approved_contributions(q, limit=limit_n)
+                if contrib:
+                    return json.dumps({"status": "success", "query": q, "restaurants": contrib}, ensure_ascii=False)
+            except Exception:
+                pass
+            return json.dumps({"status": "empty", "msg": "조건에 맞는 부산광역시 영도구 맛집을 찾지 못했습니다."}, ensure_ascii=False)
         return json.dumps({"status": "success", "query": q, "restaurants": out}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
 
-async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang: str = "ko"):
+async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang: str = "ko", strict_yeongdo: Optional[bool] = None):
     """
     카카오 Local Search 기반 의료기관/약국 검색(지오펜싱 포함)
     - [ARA Log] 로깅 요구사항 반영(키 노출 금지)
@@ -1671,6 +1770,14 @@ async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang:
     q = (kind or "").strip()
     if not q:
         q = "pharmacy" if lang == "en" else "약국"
+
+    ql = q.lower()
+    # 기본 정책:
+    # - 약국: 기존 로직 유지(주소 필터 0건이면 반경 기준 폴백 허용)
+    # - 병원/의료기관: 영도구 한정(0건이어도 주소 필터를 풀지 않음)
+    if strict_yeongdo is None:
+        is_pharmacy = ("pharmacy" in ql) or ("약국" in q)
+        strict_yeongdo = False if is_pharmacy else True
 
     url = "https://dapi.kakao.com/v2/local/search/keyword.json"
     headers = {"Authorization": f"KakaoAK {kakao_key}"}
@@ -1739,8 +1846,12 @@ async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang:
             if addr and (("영도" in addr) or ("영도구" in addr) or ("Yeongdo" in addr) or ("yeongdo" in addr)):
                 candidates_addr.append(row)
 
-        # 주소 문자열 필터로 0건이면 반경 기준으로 폴백(요구사항)
-        final = candidates_addr if candidates_addr else candidates_radius
+        # 주소 문자열 필터(영도구) 적용
+        if strict_yeongdo:
+            final = candidates_addr
+        else:
+            # 기존 정책 유지: 주소 필터로 0건이면 반경 기준으로 폴백
+            final = candidates_addr if candidates_addr else candidates_radius
 
         if not final:
             return json.dumps({"status": "empty", "msg": ("No verified facilities found within the campus vicinity" if lang == "en" else "학교 인근(반경 5km)에서 확인된 의료기관이 없습니다.")}, ensure_ascii=False)
@@ -1749,6 +1860,145 @@ async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang:
         return json.dumps({"status": "success", "kind": q, "places": final[:5]}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
+
+async def get_emergency_rooms(radius_m: int = 20000, lang: str = "ko") -> str:
+    """
+    영도구 응급실(검증된 지도 API 기반)
+    - Kakao Local Search로 '응급실' 키워드 검색 후, KMOU 반경 + 영도구 주소 필터 적용
+    - 키/데이터가 없으면: "정보를 확인 중입니다"
+    """
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+
+    kakao_key = (os.environ.get("KAKAO_REST_API_KEY") or "").strip()
+    if not kakao_key:
+        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
+
+    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+    headers = {"Authorization": f"KakaoAK {kakao_key}"}
+    radius = str(max(1000, min(int(radius_m or 20000), 20000)))
+
+    try:
+        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers) as client:
+            res = await client.get(
+                url,
+                params={
+                    "query": ("emergency room" if lang == "en" else "응급실"),
+                    "x": str(_KMOU_LON),
+                    "y": str(_KMOU_LAT),
+                    "radius": radius,
+                    "size": "15",
+                },
+                timeout=2.5,
+            )
+            res.raise_for_status()
+            data = res.json()
+
+        docs = (data.get("documents") or []) if isinstance(data, dict) else []
+        out: List[Dict[str, Any]] = []
+        for d in docs:
+            name = (d.get("place_name") or "").strip()
+            addr = (d.get("road_address_name") or d.get("address_name") or "").strip()
+            phone = (d.get("phone") or "").strip()
+            link = (d.get("place_url") or "").strip()
+            try:
+                lon = float(d.get("x")) if d.get("x") else None
+                lat = float(d.get("y")) if d.get("y") else None
+            except Exception:
+                lat, lon = None, None
+
+            near, dist_m = _is_near_kmou(lat, lon, radius_m=float(radius))
+            if not near:
+                continue
+            if addr and ("영도구" not in addr) and ("영도" not in addr):
+                continue
+            out.append({"name": name, "addr": addr, "tel": phone, "distance_m": dist_m, "link": link, "source": "kakao"})
+            if len(out) >= 5:
+                break
+
+        if not out:
+            return json.dumps({"status": "empty", "msg": ("No verified ER found." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
+
+        return json.dumps({"status": "success", "places": out, "radius_m": int(radius)}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
+
+async def get_yeongdo_emergency_rooms(lang: str = "ko") -> str:
+    """
+    영도구 응급실(즉시 제공 강화)
+    - 특정 병원 키워드를 우선 조회(예: 영도병원, 해동병원)하고,
+      결과가 없으면 상위 레벨에서 get_emergency_rooms로 폴백하도록 설계합니다.
+    - 외부 근거가 불명확하면 "정보를 확인 중입니다"로만 응답(무환각).
+    """
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+
+    kakao_key = (os.environ.get("KAKAO_REST_API_KEY") or "").strip()
+    if not kakao_key:
+        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
+
+    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+    headers = {"Authorization": f"KakaoAK {kakao_key}"}
+    radius_m = int(os.environ.get("ARA_KAKAO_YEONGDO_RADIUS_M", "20000"))
+    radius_m = max(1000, min(radius_m, 20000))
+
+    def _addr_is_yeongdo(addr: str) -> bool:
+        a = (addr or "").strip()
+        if not a:
+            return False
+        al = a.lower()
+        return ("영도구" in a) or ("yeongdo-gu" in al) or ("yeongdo gu" in al)
+
+    keywords = [
+        "영도병원 응급실",
+        "해동병원 응급실",
+        "영도병원",
+        "해동병원",
+    ]
+
+    out: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    try:
+        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers) as client:
+            for kw in keywords:
+                res = await client.get(
+                    url,
+                    params={
+                        "query": kw,
+                        "x": str(_KMOU_LON),
+                        "y": str(_KMOU_LAT),
+                        "radius": str(radius_m),
+                        "size": "5",
+                    },
+                    timeout=2.5,
+                )
+                res.raise_for_status()
+                data = res.json()
+                docs = (data.get("documents") or []) if isinstance(data, dict) else []
+                for d in docs:
+                    name = (d.get("place_name") or "").strip()
+                    addr = (d.get("road_address_name") or d.get("address_name") or "").strip()
+                    phone = (d.get("phone") or "").strip()
+                    link = (d.get("place_url") or "").strip()
+                    if addr and not _addr_is_yeongdo(addr):
+                        continue
+                    key = (link or f"{name}|{addr}").strip()
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    out.append({"name": name, "addr": addr, "tel": phone, "link": link, "source": "kakao"})
+                    if len(out) >= 5:
+                        break
+                if len(out) >= 5:
+                    break
+
+        if not out:
+            return json.dumps({"status": "empty", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
+        return json.dumps({"status": "success", "places": out, "radius_m": int(radius_m)}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
 
 async def get_medical_info(kind: str = "약국"):
     if not DATA_GO_KR_SERVICE_KEY:
@@ -1892,14 +2142,6 @@ async def get_festival_info():
         return json.dumps({"status": "empty", "msg": f"행사 조회 폴백 실패: {str(e)}"}, ensure_ascii=False)
 
 async def get_busan_festivals(lang: str = "ko"):
-    """
-    KTO(한국관광공사) searchFestival1 기반 부산 축제 조회
-    - URL: http://apis.data.go.kr/B551011/KorService1/searchFestival1
-    - Params 매핑(요구사항 준수):
-      serviceKey, numOfRows=5, pageNo=1, MobileOS=ETC, MobileApp=ARA, _type=json,
-      arrange=O, eventStartDate=오늘(KST), areaCode=6(부산), sigunguCode=""
-    - 반환: listCard item에 바로 쓸 수 있는 items(list) + 원문 필드 일부(festivals)
-    """
     lang = (lang or "ko").strip().lower()
     if lang not in {"ko", "en"}:
         lang = "ko"
@@ -1914,37 +2156,41 @@ async def get_busan_festivals(lang: str = "ko"):
             ensure_ascii=False,
         )
 
-    today_yyyymmdd = datetime.now(_KST).strftime("%Y%m%d")
-    url = "http://apis.data.go.kr/B551011/KorService1/searchFestival1"
-
-    params = {
-        "serviceKey": service_key,
-        "numOfRows": "5",
-        "pageNo": "1",
-        "MobileOS": "ETC",
-        "MobileApp": "ARA",
-        "_type": "json",
-        "arrange": "O",
-        "eventStartDate": today_yyyymmdd,
-        "areaCode": "6",  # Busan
-        "sigunguCode": "",
-        # listYN: "Y" (암묵 기본)
-    }
-
     def _fmt_ymd(yyyymmdd: str) -> str:
         s = re.sub(r"\\D+", "", str(yyyymmdd or ""))
         if len(s) != 8:
             return ""
         return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
 
-    # 썸네일 없을 때 폴백 이미지(요구사항)
-    fallback_image = "https://www.visitkorea.or.kr/favicon.ico"
+    from urllib.parse import quote
+    import requests
+
+    ref_yyyymmdd = _reference_datetime().strftime("%Y%m%d")
+    if ref_yyyymmdd < "20260120":
+        ref_yyyymmdd = "20260120"
+
+    start_query = ref_yyyymmdd[:4] + "0101"
+    url = "http://apis.data.go.kr/B551011/KorService1/searchFestival1"
+    params = {
+        "serviceKey": service_key,
+        "numOfRows": "80",
+        "pageNo": "1",
+        "MobileOS": "ETC",
+        "MobileApp": "ARA",
+        "_type": "json",
+        "eventStartDate": start_query,
+        "areaCode": "6",
+    }
 
     try:
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
-            res = await client.get(url, params=params, timeout=3.0)
-            res.raise_for_status()
-            data = res.json()
+        timeout_s = float(os.environ.get("ARA_KTO_TIMEOUT_SECONDS", "3.5"))
+
+        def _fetch_json():
+            r = requests.get(url, params=params, headers=HEADERS, timeout=timeout_s, verify=HTTPX_VERIFY)
+            r.raise_for_status()
+            return r.json()
+
+        data = await asyncio.to_thread(_fetch_json)
 
         body = _safe_get(data, "response", "body", default={}) or {}
         total = _safe_get(body, "totalCount", default=0)
@@ -1953,10 +2199,7 @@ async def get_busan_festivals(lang: str = "ko"):
         except Exception:
             total_i = 0
 
-        print(f"[ARA Log] KTO searchFestival1 totalCount={total_i} date={today_yyyymmdd}")
-
-        if total_i <= 0:
-            return json.dumps({"status": "empty", "msg": "현재 부산에서 진행 중인 축제가 없습니다."}, ensure_ascii=False)
+        print(f"[ARA Log] KTO searchFestival1 totalCount={total_i} ref={ref_yyyymmdd}")
 
         items = _safe_get(body, "items", "item", default=[]) or []
         if isinstance(items, dict):
@@ -1964,73 +2207,66 @@ async def get_busan_festivals(lang: str = "ko"):
         if not isinstance(items, list):
             items = []
 
-        out_items: List[Dict[str, Any]] = []
         out_festivals: List[Dict[str, Any]] = []
-
-        # URL 인코딩(네이버 검색 링크)
-        try:
-            from urllib.parse import quote
-        except Exception:
-            quote = None
-
-        for it in items[:5]:
+        for it in items:
             if not isinstance(it, dict):
                 continue
             title = (it.get("title") or "").strip()
             addr1 = (it.get("addr1") or "").strip()
             start = (it.get("eventstartdate") or "").strip()
             end = (it.get("eventenddate") or "").strip()
-            tel = (it.get("tel") or "").strip()
-            img = (it.get("firstimage") or "").strip()
-            if not img:
-                img = fallback_image
+            sd = re.sub(r"\\D+", "", start)
+            ed = re.sub(r"\\D+", "", end)
+            if len(sd) != 8 or len(ed) != 8:
+                continue
+            if ed < ref_yyyymmdd:
+                continue
+            if sd <= ref_yyyymmdd <= ed:
+                state = "ongoing"
+            elif sd > ref_yyyymmdd:
+                state = "upcoming"
+            else:
+                state = "ongoing"
 
-            q = title or "부산 축제"
-            q_enc = quote(q) if quote else q
-            link = f"https://search.naver.com/search.naver?query={q_enc}"
+            q = addr1 or title or "부산 축제"
+            link = "https://map.kakao.com/link/search/" + quote(q)
 
-            desc = f"{addr1}\\n📅 {_fmt_ymd(start)} ~ {_fmt_ymd(end)}".strip()
-
-            out_items.append(
-                {
-                    "title": title[:50] if title else "축제",
-                    "description": desc[:230],
-                    "imageUrl": img,
-                    "link": {"web": link},
-                }
-            )
             out_festivals.append(
                 {
-                    "title": title,
+                    "title": title or "축제",
                     "addr1": addr1,
-                    "eventstartdate": start,
-                    "eventenddate": end,
-                    "firstimage": img,
-                    "tel": tel,
+                    "eventstartdate": sd,
+                    "eventenddate": ed,
+                    "state": state,
+                    "date_text": f"📅 {_fmt_ymd(sd)} ~ {_fmt_ymd(ed)}",
+                    "place": addr1,
                     "link": link,
                 }
             )
 
-        if not out_items:
-            return json.dumps({"status": "empty", "msg": "현재 부산에서 진행 중인 축제가 없습니다."}, ensure_ascii=False)
+        if not out_festivals:
+            return json.dumps({"status": "empty", "msg": "현재 진행 중이거나 예정된 부산 축제가 없습니다."}, ensure_ascii=False)
+
+        out_festivals.sort(key=lambda x: (0 if x.get("state") == "ongoing" else 1, (x.get("title") or "")))
+        out_festivals = out_festivals[:5]
 
         return json.dumps(
             {
                 "status": "success",
                 "source": "kto_searchFestival1",
-                "eventStartDate": today_yyyymmdd,
+                "refDate": ref_yyyymmdd,
+                "eventStartDate": start_query,
                 "totalCount": total_i,
-                "items": out_items,
                 "festivals": out_festivals,
             },
             ensure_ascii=False,
         )
     except json.JSONDecodeError:
-        return json.dumps({"status": "error", "msg": "축제 데이터 JSON 파싱에 실패했습니다."}, ensure_ascii=False)
-    except httpx.TimeoutException:
-        return json.dumps({"status": "error", "msg": "축제 API 호출이 지연되었습니다. 잠시 후 다시 시도해 주세요."}, ensure_ascii=False)
+        return json.dumps({"status": "error", "msg": "현재 축제 정보를 불러올 수 없습니다."}, ensure_ascii=False)
+    except requests.Timeout:
+        return json.dumps({"status": "error", "msg": "현재 축제 정보를 불러올 수 없습니다."}, ensure_ascii=False)
     except Exception as e:
-        return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
+        return json.dumps({"status": "error", "msg": "현재 축제 정보를 불러올 수 없습니다."}, ensure_ascii=False)
 
 # =========================
 # 4) 셔틀/캠퍼스맵 (이미지 기반 기능 추가)
@@ -2303,12 +2539,26 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "get_bus_arrival",
-            "description": "🚌 190번 버스(남포행): 정류장ID 03053 기준 다음/다다음 도착 정보를 조회하고, 카카오 Carousel(itemCard) payload를 반환합니다.",
+            "description": "🚌 190번 버스(남포/시내행): 정류장ID 03053 기준 다음/다다음 도착 정보를 조회합니다(반환: JSON 문자열).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "bus_number": {"type": "string", "description": "예: 190 (미입력 시 190 기본값)"},
                     "lang": {"type": "string", "description": "ko 또는 en(선택)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_bus_190_tracker_busbusinfo",
+            "description": "🚌 190번 버스(한국해양대 기점→남부민동): 실시간 위치(차량목록)와 기점(04001) 출발 예정(min1) 정보를 통합해 반환합니다(반환: JSON 문자열).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "line_id": {"type": "string", "description": "노선 ID (기본 5200190000)"},
+                    "kmou_stop_id": {"type": "string", "description": "기점 정류장 ID (기본 04001)"},
                 },
             },
         },
@@ -2325,23 +2575,7 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "get_weather_info",
-            "description": "🌤️ 오늘의 영도 날씨(시그니처 UI): 풍속/체감온도 포함 ItemCard payload를 반환합니다.",
-            "parameters": {"type": "object", "properties": {"lang": {"type": "string", "description": "ko 또는 en(선택)"}}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_daily_menu",
-            "description": "🍱 오늘의 학식(캐시): KMOU Coop 식단을 '하루 1회(04:00 KST)'만 크롤링해 캐시된 결과를 반환합니다.",
-            "parameters": {"type": "object", "properties": {"lang": {"type": "string", "description": "ko 또는 en(선택)"}}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_cafeteria_menu",
-            "description": "🍱 오늘의 학식(시그니처 UI): 캐시된 식단으로 ItemCard payload를 반환합니다.",
+            "description": "🌤️ 오늘의 영도 날씨: 풍속/체감온도 포함 요약을 반환합니다(반환: JSON 문자열).",
             "parameters": {"type": "object", "properties": {"lang": {"type": "string", "description": "ko 또는 en(선택)"}}},
         },
     },
@@ -2386,6 +2620,20 @@ TOOLS_SPEC = [
                 "properties": {
                     "kind": {"type": "string", "description": "예: pharmacy, hospital, 약국, 치과 등(선택)"},
                     "radius_m": {"type": "integer", "description": "반경(m), 기본 5000"},
+                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_emergency_rooms",
+            "description": "🚑 영도구 응급실: Kakao Local Search 기반으로 영도구 내 응급실 정보를 제공합니다(반환: JSON 문자열).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "radius_m": {"type": "integer", "description": "반경(m), 기본 20000"},
                     "lang": {"type": "string", "description": "ko 또는 en(선택)"},
                 },
             },

@@ -8,11 +8,10 @@ from openai import AsyncOpenAI
 from tools import (
     TOOLS_SPEC,
     get_bus_arrival,
+    get_bus_190_tracker_busbusinfo,
     get_cheap_eats,
     get_medical_info,
     get_kmou_weather,
-    get_daily_menu,
-    get_cafeteria_menu,
     get_weather_info,
     get_festival_info,
     get_shuttle_next_buses,
@@ -29,11 +28,10 @@ client = AsyncOpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
 
 TOOL_MAP = {
     "get_bus_arrival": get_bus_arrival,
+    "get_bus_190_tracker_busbusinfo": get_bus_190_tracker_busbusinfo,
     "get_cheap_eats": get_cheap_eats,
     "get_medical_info": get_medical_info,
     "get_kmou_weather": get_kmou_weather,
-    "get_daily_menu": get_daily_menu,
-    "get_cafeteria_menu": get_cafeteria_menu,
     "get_weather_info": get_weather_info,
     "get_festival_info": get_festival_info,
     "get_shuttle_next_buses": get_shuttle_next_buses,
@@ -310,11 +308,29 @@ async def ask_ara(
     # - 카카오 응답 타임아웃 방지 목적
     # ---------------------
     norm = _norm_utterance(user_input)
+    if norm in {_norm_utterance("학식"), _norm_utterance("오늘 학식"), _norm_utterance("오늘의 식단")}:
+        # 크롤링/추측 금지: 공식 Coop 사이트 링크만 제공
+        response_text = (
+            "KMOU Coop: http://www.kmoucoop.or.kr/\n"
+            if lang == "en"
+            else "학식은 KMOU Coop에서 확인하실 수 있습니다.\nhttp://www.kmoucoop.or.kr/"
+        )
+        response_text = _sanitize_response_text_with_context(response_text, user_input)
+        save_conversation_pair(
+            conversation_id=conversation_id,
+            user_id=user_id,
+            user_query=user_input,
+            ai_answer=response_text,
+            tools_used=[],
+            user_feedback=0,
+            is_gold_standard=False,
+        )
+        if return_meta:
+            return {"content": response_text, "conversation_id": conversation_id}
+        return response_text
+
     quick_map = {
         _norm_utterance("지금 학교 날씨 어때?"): ("get_kmou_weather", {}),
-        _norm_utterance("학식"): ("get_daily_menu", {}),
-        _norm_utterance("오늘 학식"): ("get_daily_menu", {}),
-        _norm_utterance("오늘의 식단"): ("get_daily_menu", {}),
         _norm_utterance("영도 착한가격 식당 추천해줘"): ("get_cheap_eats", {"food_type": ""}),
         _norm_utterance("학교 근처 약국이나 병원 알려줘"): ("get_medical_info", {"kind": ""}),
         _norm_utterance("지금 부산에 하는 축제 있어?"): ("get_festival_info", {}),
@@ -325,7 +341,7 @@ async def ask_ara(
         try:
             # tools 로컬라이즈: lang 전달(가능한 함수만)
             args = dict(args or {})
-            if func_name in {"get_bus_arrival", "get_shuttle_next_buses", "get_kmou_weather", "get_campus_contacts", "get_academic_schedule", "get_daily_menu", "get_cafeteria_menu", "get_weather_info"} and "lang" not in args:
+            if func_name in {"get_bus_arrival", "get_shuttle_next_buses", "get_kmou_weather", "get_campus_contacts", "get_academic_schedule", "get_weather_info"} and "lang" not in args:
                 args["lang"] = lang
             raw = await TOOL_MAP[func_name](**args) if args else await TOOL_MAP[func_name]()
             payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
@@ -422,16 +438,27 @@ async def ask_ara(
         # 버스 번호가 없으면 KMOU 핵심 노선 190을 기본값으로 상정
         if not bus_num:
             bus_num = "190"
-        # 카카오 시그니처 UI 도입으로 버스 방향은 OUT(남포행)으로 고정합니다.
+        # 버스 방향은 OUT(남포행)으로 고정합니다.
         direction = "OUT"
 
         try:
-            payload = await get_bus_arrival(bus_number=bus_num, direction="OUT", lang=lang)
-            # tools는 dict(payload) 또는 문자열을 반환할 수 있으므로 안전하게 텍스트로 정리
-            if isinstance(payload, dict):
-                response_text = payload.get("text") or payload.get("msg") or "버스 정보를 확인할 수 없습니다."
+            raw = await get_bus_arrival(bus_number=bus_num, direction="OUT", lang=lang)
+            payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            if isinstance(payload, dict) and payload.get("status") == "success":
+                b1 = payload.get("bus1") or {}
+                b2 = payload.get("bus2") or {}
+                min1 = (b1.get("min") or "")
+                min2 = (b2.get("min") or "")
+                st1 = (b1.get("stop") or "")
+                st2 = (b2.get("stop") or "")
+                response_text = (
+                    f"🚌 190번(남포/시내행)\n"
+                    f"1) {min1}분 후 ({st1}정거장)\n"
+                    + (f"2) {min2}분 후 ({st2}정거장)\n" if min2 else "2) 도착 정보 없음\n")
+                    + "도로 사정에 따라 변동 가능"
+                )
             else:
-                response_text = str(payload or "")
+                response_text = (payload.get("msg") if isinstance(payload, dict) else None) or ("정보를 확인 중입니다" if lang != "en" else "Data is being verified.")
         except Exception as e:
             response_text = f"버스 정보를 조회하는 과정에서 오류가 발생했습니다.\n사유: {str(e)}"
             save_conversation_pair(
@@ -475,11 +502,11 @@ async def ask_ara(
         + (
             "You are 'ARA', a smart assistant for Korea Maritime and Ocean University (KMOU) students.\n"
             "IMPORTANT: Respond ONLY in English.\n"
-            "Always use a polite, professional business tone.\n\n"
+            "Tone: confident but polite; like a young builder/founder.\n\n"
             if lang == "en"
             else "당신은 한국해양대학교(KMOU) 학생들을 위한 스마트 AI 비서 'ARA'입니다.\n"
             "중요: 반드시 한국어로만 답변하십시오.\n"
-            "항상 매우 정중하고 전문적인 비즈니스 어조를 사용하십시오.\n\n"
+            "톤: 20대 대학생 창업가/AI 맥시멀리스트 느낌의 자신감 있는 말투를 사용하되, 반드시 정중함과 공손함을 유지하십시오.\n\n"
         )
     )
 
@@ -570,7 +597,7 @@ async def ask_ara(
                 func_name = tc.function.name
                 args = json.loads(tc.function.arguments)
                 # tools 로컬라이즈: lang 전달(가능한 함수만)
-                if func_name in {"get_bus_arrival", "get_shuttle_next_buses", "get_kmou_weather", "get_campus_contacts", "get_academic_schedule", "get_daily_menu", "get_cafeteria_menu", "get_weather_info"} and "lang" not in args:
+                if func_name in {"get_bus_arrival", "get_shuttle_next_buses", "get_kmou_weather", "get_campus_contacts", "get_academic_schedule", "get_weather_info"} and "lang" not in args:
                     args["lang"] = lang
                 if func_name in TOOL_MAP:
                     tasks.append(TOOL_MAP[func_name](**args) if args else TOOL_MAP[func_name]())
