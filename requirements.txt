@@ -6,4 +6,3 @@ beautifulsoup4
 apscheduler
 python-dotenv
 requests
-xmltodict
