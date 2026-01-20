@@ -70,6 +70,17 @@ def init_db():
         """
     )
 
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS restaurant_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            reported_text TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+        """
+    )
+
     # 사용자 제보(요구사항 명시: user_contribution_db) — 구조화 저장(프로토타입)
     cursor.execute(
         """
@@ -208,6 +219,24 @@ def save_food_contribution(user_id: Optional[str], text: str) -> None:
         # 레거시 테이블도 유지(호환)
         cursor.execute(
             "INSERT INTO user_contributions (user_id, text) VALUES (?, ?)",
+            (user_id, t),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        return
+
+def save_restaurant_report(user_id: Optional[str], reported_text: str) -> None:
+    if not user_id:
+        return
+    t = (reported_text or "").strip()
+    if not t:
+        return
+    try:
+        conn = sqlite3.connect("history.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO restaurant_reports (user_id, reported_text) VALUES (?, ?)",
             (user_id, t),
         )
         conn.commit()

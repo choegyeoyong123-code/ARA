@@ -27,6 +27,7 @@ from database import (
     save_history,
     log_interaction,
     save_food_contribution,
+    save_restaurant_report,
     list_user_contribution_db,
     set_user_contribution_status,
 )
@@ -148,7 +149,6 @@ def _nav_quick_replies(lang: str) -> list[dict]:
             {"label": "📞 Contact", "action": "message", "messageText": "contact"},
             {"label": "🍚 Food", "action": "message", "messageText": "food"},
             {"label": "🏥 Hospital", "action": "message", "messageText": "hospital"},
-            {"label": "🎉 Festival", "action": "message", "messageText": "festival"},
         ]
     else:
         base = [
@@ -160,7 +160,6 @@ def _nav_quick_replies(lang: str) -> list[dict]:
             {"label": "📞 캠퍼스 연락처", "action": "message", "messageText": "캠퍼스 연락처"},
             {"label": "🍚 맛집 추천", "action": "message", "messageText": "맛집"},
             {"label": "🏥 약국/병원", "action": "message", "messageText": "약국/병원"},
-            {"label": "🎉 축제/행사", "action": "message", "messageText": "부산 행사"},
         ]
     # Toggle 버튼은 항상 마지막에 추가
     base.append(
@@ -532,7 +531,6 @@ def _is_nav_intent(msg: str) -> bool:
         "약국", "pharmacy",
         "병원", "hospital",
         "응급실", "emergency",
-        "축제", "행사", "festival", "event",
         "학식", "식단", "cafeteria",
         "맛집 제보", "제보하기",
         "병원 찾기", "약국 찾기",
@@ -604,6 +602,36 @@ def _infer_direction(text: str) -> str | None:
 def _extract_digits(text: str) -> str:
     return "".join(re.findall(r"\d+", str(text or "")))
 
+def _extract_worknet_keyword(user_msg: str) -> str:
+    s = (user_msg or "").strip()
+    if not s:
+        return "해운 물류"
+    tl = s.lower()
+    # 대표 키워드가 직접 포함되면 그대로 활용(최소 보정)
+    for k in ["해운", "항만", "물류", "포워딩", "선사", "운항", "해사", "shipping", "port", "logistics", "maritime", "forwarding"]:
+        if k in tl:
+            # 한국어/영어 혼합 가능: 원문에서 의미 있는 구간만 남기도록 후처리
+            break
+
+    # 일반적인 “요청어/플랫폼명” 제거 후 남는 부분을 검색어로 사용
+    cleaned = s
+    for w in [
+        "워크넷", "worknet",
+        "채용", "취업", "일자리", "구인", "구직", "career", "job", "jobs",
+        "추천", "찾아줘", "알려줘", "보여줘", "검색", "search",
+        "관련", "쪽", "쪽으로", "좀", "요즘", "지금",
+        "해양대", "kmou", "한국해양대", "한국해양대학교",
+    ]:
+        cleaned = re.sub(re.escape(w), " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    # 너무 비면 기본 검색어로
+    if not cleaned or len(cleaned) < 2:
+        return "해운 물류"
+
+    # 길이 제한(워크넷 키워드 과다 방지)
+    return cleaned[:50]
+
 async def _handle_structured_kakao(user_msg: str, user_id: str | None):
     """
     카카오용: 도구 결과를 구조화된 카드로 변환(정확성/형식 준수).
@@ -621,7 +649,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             else "weather" if ("날씨" in msg or "weather" in tl)
             else "cafeteria" if ("학식" in msg or "식단" in msg or "cafeteria" in tl)
             else "emergency" if ("응급실" in msg or "emergency" in tl)
-            else "festival" if ("축제" in msg or "행사" in msg or "festival" in tl or "event" in tl)
             else "restaurants" if ("맛집" in msg or "식당" in msg or "food" in tl or "restaurant" in tl)
             else "medical" if ("약국" in msg or "병원" in msg or "pharmacy" in tl or "hospital" in tl)
             else "other"
@@ -753,9 +780,9 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         if payload.get("status") != "success":
             return _kakao_basic_card(
-                title="Restaurants",
+                title=("Cafe" if lang == "en" else "카페/커피"),
                 description=_normalize_desc(payload.get("msg") or "조건에 맞는 결과를 찾지 못했습니다."),
-                buttons=[{"action": "message", "label": "다시 선택", "messageText": "맛집"}],
+                buttons=[{"action": "message", "label": ("다시 검색" if lang != "en" else "Retry"), "messageText": ("카페" if lang != "en" else "coffee")}],
             )
         items = []
         for r in (payload.get("restaurants") or [])[:5]:
@@ -765,26 +792,27 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             items.append({"title": name[:50], "description": _normalize_desc(addr), "link": {"web": (link or _map_search_link(name))}})
         if not items:
             return _kakao_basic_card(
-                title="Restaurants",
+                title=("Cafe" if lang == "en" else "카페/커피"),
                 description=("정보를 확인 중입니다" if lang != "en" else "Data is being verified."),
-                buttons=[{"action": "message", "label": "다시 선택", "messageText": "맛집"}],
+                buttons=[{"action": "message", "label": ("다시 검색" if lang != "en" else "Retry"), "messageText": ("카페" if lang != "en" else "coffee")}],
             )
         return _kakao_list_card(
-            header_title=(f"부산광역시 영도구 맛집: {payload.get('query','')}" if lang != "en" else f"Food in Yeongdo-gu: {payload.get('query','')}"),
+            header_title=(f"부산광역시 영도구 카페: {payload.get('query','')}" if lang != "en" else f"Cafes in Yeongdo-gu: {payload.get('query','')}"),
             items=items or [{"title": "검색 결과", "description": "표시할 결과가 없습니다.", "link": {"web": _map_search_link(msg)}}],
             buttons=[
-                {"action": "message", "label": ("다른 종류" if lang != "en" else "Other type"), "messageText": "맛집"},
+                {"action": "message", "label": ("맛집 랜덤" if lang != "en" else "Random food"), "messageText": "맛집"},
                 {"action": "message", "label": ("맛집 제보하기" if lang != "en" else "Suggest a place"), "messageText": "맛집 제보하기"},
             ],
         )
 
-    if pending == "food_contribution":
+    if pending == "restaurant_report":
         _pending_clear(user_id)
         try:
             save_food_contribution(user_id=user_id, text=msg)
+            save_restaurant_report(user_id=user_id, reported_text=msg)
             return _kakao_basic_card(
                 title=("맛집 제보 완료" if lang != "en" else "Suggestion received"),
-                description=("제보 감사합니다. 검토 후 반영하겠습니다." if lang != "en" else "Thanks! We will review and consider adding it."),
+                description=("제보 고마워요. 제가 바로 DB에 저장해두고, 검토되면 반영될 수 있게 해둘게요." if lang != "en" else "Thanks! Saved to DB for review."),
                 buttons=[{"action": "message", "label": ("맛집 보기" if lang != "en" else "Find food"), "messageText": "맛집"}],
             )
         except Exception:
@@ -841,7 +869,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             title=("Cafeteria Menu" if lang == "en" else "오늘의 학식"),
             description=("KMOU Coop 사이트로 이동합니다." if lang == "en" else "한국해양대학교 소비자생활협동조합 사이트로 바로 연결합니다."),
             buttons=[
-                {"action": "webLink", "label": ("Open KMOU Coop" if lang == "en" else "학식 보러가기"), "webLinkUrl": "http://www.kmoucoop.or.kr/"},
+                {"action": "webLink", "label": ("Open diet page" if lang == "en" else "학식 보러가기"), "webLinkUrl": "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"},
             ],
         )
 
@@ -869,73 +897,97 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             ],
         )
 
-    # Festival/Events
-    if ("축제" in msg) or ("행사" in msg) or ("festival" in msg.lower()) or ("event" in msg.lower()):
-        from tools import get_busan_festivals
-        raw = await get_busan_festivals(lang=lang)
+    if any(k in msg for k in ["취업", "채용", "일자리", "워크넷", "worknet", "job", "jobs", "career"]):
+        from tools import get_worknet_maritime_logistics_jobs
+
+        keyword = _extract_worknet_keyword(msg)
+        raw = await get_worknet_maritime_logistics_jobs(query=keyword, limit=5, lang=lang)
+        payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        if not isinstance(payload, dict):
+            payload = {}
+        if payload.get("status") == "error":
+            return _kakao_basic_card(
+                title=("Jobs" if lang == "en" else "채용"),
+                description=_normalize_desc(payload.get("msg") or ("정보를 확인 중입니다" if lang != "en" else "Data is being verified.")),
+                buttons=[{"action": "message", "label": ("다시 조회" if lang != "en" else "Retry"), "messageText": msg}],
+            )
+        if payload.get("status") == "empty":
+            return _kakao_basic_card(
+                title=("Jobs" if lang == "en" else "채용"),
+                description=_normalize_desc(payload.get("msg") or ("현재 진행 중인 해운/물류 채용 공고가 없습니다." if lang != "en" else "No jobs found.")),
+                buttons=[
+                    {"action": "message", "label": ("다른 키워드로" if lang != "en" else "Try another keyword"), "messageText": ("물류 채용" if lang != "en" else "logistics jobs")},
+                    {"action": "message", "label": ("다시 조회" if lang != "en" else "Retry"), "messageText": msg},
+                ],
+            )
+
+        jobs = (payload.get("jobs") or [])[:5]
+        items = []
+        for j in jobs:
+            if not isinstance(j, dict):
+                continue
+            title = (j.get("title") or "채용").strip()
+            company = (j.get("company") or "").strip()
+            region = (j.get("region") or "").strip()
+            end_date = (j.get("end_date") or "").strip()
+            link = (j.get("link") or _map_search_link(title)).strip()
+            desc = " / ".join([x for x in [company, region, (f"마감 {end_date}" if end_date else "")] if x]).strip()
+            items.append({"title": title[:50], "description": _normalize_desc(desc), "link": {"web": link}})
+        return _kakao_list_card(
+            header_title=(f"Maritime/Logistics Jobs: {keyword}" if lang == "en" else f"해운/물류 채용(워크넷): {keyword}"),
+            items=items or [{"title": "채용", "description": "정보를 확인 중입니다", "link": {"web": "https://www.work.go.kr"}}],
+            buttons=[{"action": "webLink", "label": ("Open Worknet" if lang == "en" else "워크넷 열기"), "webLinkUrl": "https://www.work.go.kr"}],
+        )
+
+    if ("맛집" in msg) or ("식당" in msg) or ("restaurants" in msg.lower()) or ("food" in msg.lower()) or ("restaurant" in msg.lower()):
+        from tools import get_random_yeongdo_restaurant
+
+        raw = await get_random_yeongdo_restaurant()
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         if not isinstance(payload, dict) or payload.get("status") != "success":
             return _kakao_basic_card(
-                title="부산 축제/행사",
-                description=_normalize_desc((payload.get("msg") if isinstance(payload, dict) else None) or "현재 축제 정보를 불러올 수 없습니다."),
-                buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
-            )
-        festivals = (payload.get("festivals") or [])[:5]
-        if not festivals:
-            return _kakao_basic_card(
-                title=("Busan Festival/Events" if lang == "en" else "부산 축제/행사"),
-                description=("No ongoing or upcoming festivals in Busan." if lang == "en" else "현재 진행 중이거나 예정된 부산 축제가 없습니다."),
-                buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
-            )
-
-        cards = []
-        for f in festivals:
-            if not isinstance(f, dict):
-                continue
-            title = (f.get("title") or "행사").strip()
-            place = (f.get("place") or f.get("addr1") or "").strip()
-            date_text = (f.get("date_text") or "").strip()
-            link = (f.get("link") or _map_search_link(place or title)).strip()
-            desc = "\n".join([x for x in [date_text, (f"장소: {place}" if place else "")] if x]).strip()
-            card = {
-                "title": title[:50],
-                "description": _normalize_desc_preserve_lines(desc),
-                "buttons": [
-                    {"action": "webLink", "label": ("View on map" if lang == "en" else "카카오맵 상세보기"), "webLinkUrl": link},
+                title=("맛집" if lang != "en" else "Restaurant"),
+                description=("부산 영도구 맛집을 지금은 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." if lang != "en" else "Unable to load a random restaurant right now."),
+                buttons=[
+                    {"action": "message", "label": ("다시 뽑기" if lang != "en" else "Retry"), "messageText": "맛집"},
+                    {"action": "message", "label": ("카페/커피" if lang != "en" else "Cafe"), "messageText": ("카페" if lang != "en" else "coffee")},
+                    {"action": "message", "label": ("맛집 제보하기" if lang != "en" else "Suggest a place"), "messageText": "맛집 제보하기"},
                 ],
-            }
-            cards.append(card)
-        if not cards:
-            return _kakao_basic_card(
-                title=("Busan Festival/Events" if lang == "en" else "부산 축제/행사"),
-                description=("No ongoing or upcoming festivals in Busan." if lang == "en" else "현재 진행 중이거나 예정된 부산 축제가 없습니다."),
-                buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
             )
-        return _kakao_carousel_basic_cards(cards)
-
-    # Restaurants(멀티턴): 정적 리스트 제공 금지 → 음식 종류를 먼저 질문
-    if ("맛집" in msg) or ("식당" in msg) or ("restaurants" in msg.lower()) or ("food" in msg.lower()):
-        _pending_set(user_id, "restaurants")
+        r = payload.get("restaurant") or {}
+        name = (r.get("name") or "맛집").strip()
+        addr = (r.get("addr") or "").strip()
+        tel = (r.get("tel") or "").strip()
+        link = (r.get("link") or _map_search_link(addr or name)).strip()
+        desc = " / ".join([x for x in [addr, tel] if x]).strip() or "정보를 확인 중입니다"
         return _kakao_basic_card(
-            title="Restaurants",
-            description=("What kind of food are you looking for today? (e.g., Korean, Chinese, Coffee, etc.)"
-                         if lang == "en"
-                         else "오늘은 어떤 종류의 음식을 찾으시나요? (예: 한식, 중식, 카페/커피, 분식 등)"),
+            title=(name[:50]),
+            description=_normalize_desc(desc),
             buttons=[
-                {"action": "message", "label": ("Korean" if lang == "en" else "한식"), "messageText": ("korean" if lang == "en" else "한식")},
-                {"action": "message", "label": ("Coffee" if lang == "en" else "카페/커피"), "messageText": ("coffee" if lang == "en" else "카페")},
-                {"action": "message", "label": ("맛집 제보하기" if lang != "en" else "Suggest a place"), "messageText": "맛집 제보하기"},
+                {"action": "webLink", "label": ("Open map" if lang == "en" else "카카오맵 열기"), "webLinkUrl": link},
+                {"action": "message", "label": ("다른 맛집 랜덤" if lang != "en" else "Another one"), "messageText": "맛집"},
+                {"action": "message", "label": ("카페/커피" if lang != "en" else "Cafe"), "messageText": ("카페" if lang != "en" else "coffee")},
             ],
         )
 
     # 맛집 제보 플로우(권유형 UX)
     if msg == "맛집 제보하기":
-        _pending_set(user_id, "food_contribution")
+        _pending_set(user_id, "restaurant_report")
         return _kakao_basic_card(
             title=("맛집 제보하기" if lang != "en" else "Suggest a place"),
             description=("아래 형식으로 한 번에 보내주세요:\n가게명 / 주소(영도구) / 한 줄 추천"
                          if lang != "en"
                          else "Send in one message:\nName / Address(Yeongdo) / One-line recommendation"),
+            buttons=[
+                {"action": "message", "label": ("취소" if lang != "en" else "Cancel"), "messageText": "맛집"},
+            ],
+        )
+
+    if (msg == "카페") or (msg.lower().strip() in {"coffee", "cafe"}) or ("카페" in msg) or ("커피" in msg):
+        _pending_set(user_id, "restaurants")
+        return _kakao_basic_card(
+            title=("Cafe" if lang == "en" else "카페/커피"),
+            description=("원하는 카페 키워드를 입력해 주세요. (예: 동삼동 카페, 디저트, 커피)" if lang != "en" else "Type a cafe keyword (e.g., dessert, coffee)."),
             buttons=[
                 {"action": "message", "label": ("취소" if lang != "en" else "Cancel"), "messageText": "맛집"},
             ],

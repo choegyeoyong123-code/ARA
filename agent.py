@@ -13,7 +13,6 @@ from tools import (
     get_medical_info,
     get_kmou_weather,
     get_weather_info,
-    get_festival_info,
     get_shuttle_next_buses,
     search_restaurants,
     get_calendar_day_2026,
@@ -33,7 +32,6 @@ TOOL_MAP = {
     "get_medical_info": get_medical_info,
     "get_kmou_weather": get_kmou_weather,
     "get_weather_info": get_weather_info,
-    "get_festival_info": get_festival_info,
     "get_shuttle_next_buses": get_shuttle_next_buses,
     "search_restaurants": search_restaurants,
     "get_calendar_day_2026": get_calendar_day_2026,
@@ -311,9 +309,9 @@ async def ask_ara(
     if norm in {_norm_utterance("학식"), _norm_utterance("오늘 학식"), _norm_utterance("오늘의 식단")}:
         # 크롤링/추측 금지: 공식 Coop 사이트 링크만 제공
         response_text = (
-            "KMOU Coop: http://www.kmoucoop.or.kr/\n"
+            "KMOU diet: https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189\n"
             if lang == "en"
-            else "학식은 KMOU Coop에서 확인하실 수 있습니다.\nhttp://www.kmoucoop.or.kr/"
+            else "학식은 한국해양대학교 공식 페이지에서 확인하실 수 있습니다.\nhttps://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"
         )
         response_text = _sanitize_response_text_with_context(response_text, user_input)
         save_conversation_pair(
@@ -333,7 +331,6 @@ async def ask_ara(
         _norm_utterance("지금 학교 날씨 어때?"): ("get_kmou_weather", {}),
         _norm_utterance("영도 착한가격 식당 추천해줘"): ("get_cheap_eats", {"food_type": ""}),
         _norm_utterance("학교 근처 약국이나 병원 알려줘"): ("get_medical_info", {"kind": ""}),
-        _norm_utterance("지금 부산에 하는 축제 있어?"): ("get_festival_info", {}),
     }
 
     if norm in quick_map:
@@ -404,13 +401,6 @@ async def ask_ara(
                 "요청하신 학교 근처 약국/병원 정보입니다." if lang != "en" else "Here are pharmacies/hospitals near KMOU.",
                 payload.get("hospitals") or [],
                 [("name", "기관:"), ("kind", "종류:"), ("addr", "주소:"), ("tel", "전화:"), ("time", "시간:")],
-                lang=lang,
-            )
-        elif func_name == "get_festival_info":
-            response_text = _format_list_response(
-                "요청하신 부산 축제/행사 정보입니다." if lang != "en" else "Here are festival/events in Busan (verified dates only).",
-                payload.get("festivals") or [],
-                [("title", "제목:"), ("place", "장소:"), ("date", "일정:")],
                 lang=lang,
             )
         else:
@@ -546,7 +536,7 @@ async def ask_ara(
             + "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '사용자님' 또는 무호칭입니다.\n"
             + "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 필요한 경우 '확인할 수 없습니다'라고 명시하십시오.\n"
             + "- 숫자/수치 금지 환각: 절대 숫자를 추측하거나 임의로 생성하지 마십시오. 응답에 포함되는 모든 숫자/수치는 반드시 tools.py 도구가 반환한 raw data에서 직접 근거를 가져야 합니다.\n"
-            + "- 도구 우선: 버스/날씨/의료/축제/맛집 등 데이터가 필요한 질문은 반드시 제공된 도구를 호출하여 결과를 기반으로 답하십시오.\n"
+            + "- 도구 우선: 버스/날씨/의료/맛집 등 데이터가 필요한 질문은 반드시 제공된 도구를 호출하여 결과를 기반으로 답하십시오.\n"
             + "- raw data 원칙: 도구를 호출한 경우, tools.py가 반환한 raw data(JSON 문자열/객체)만을 근거로 답변하십시오. raw data에 없는 항목(시간, 금액, 개수, 순위 등)을 임의로 만들어내지 마십시오.\n"
             + "- 데이터 실패 시: 도구 결과가 empty/error이면, 실패 사유를 간단히 설명하고 가능한 대안을 제시하되 추측은 금지합니다.\n"
             + "- 데이터 부재 시 응답: 필요한 raw data가 없으면 '모르겠습니다/확인할 수 없습니다'라고 답하십시오.\n"
@@ -558,7 +548,7 @@ async def ask_ara(
             "  - Data is currently being updated for this specific date.\n\n"
             "## 버튼 입력 우선 처리\n"
             "- 사용자가 버튼(퀵플라이)을 통해 입력한 메시지는 최우선적으로 해당 기능 호출 의도로 간주하십시오.\n"
-            "- 예: '190번 버스 IN/OUT', '지금 학교 날씨 어때?', '영도 착한가격 식당 추천해줘', '학교 근처 약국이나 병원 알려줘', '지금 부산에 하는 축제 있어?'\n\n"
+            "- 예: '190번 버스 IN/OUT', '지금 학교 날씨 어때?', '영도 착한가격 식당 추천해줘', '학교 근처 약국이나 병원 알려줘'\n\n"
             "## 버스 안내 정책(Ocean View)\n"
             "- 사용자의 모호한 표현도 가능한 범위 내에서 스스로 해석하되, 추측은 금지합니다.\n"
             "- 버스 문의 시 OUT/IN 방향이 명시되지 않은 경우, 문맥으로 자동 추론합니다.\n"

@@ -176,7 +176,7 @@ def get_academic_schedule(query: Optional[str] = None, today_yyyy_mm_dd: Optiona
         "1학기 수업일수 1/3선": "2026-04-07",
         "1학기 중간고사(예상)": "2026-04-20", # 8th week estimate
         "근로자의 날": "2026-05-01",
-        "대동제(축제/예상)": "2026-05-20",    # Based on 2025 pattern (3rd week of May)
+        "대동제(예상)": "2026-05-20",
         "1학기 기말고사(예상)": "2026-06-15",
         "여름방학 시작": "2026-06-22",
         "2학기 개강": "2026-09-01",
@@ -789,6 +789,13 @@ def _fmt_num(x: float) -> str:
     s = f"{v:.1f}"
     return s.rstrip("0").rstrip(".")
 
+def _wind_chill_c(temp_c: float, wind_speed_ms: float) -> float:
+    t = float(temp_c or 0.0)
+    v_kmh = float(wind_speed_ms or 0.0) * 3.6
+    if t <= 10.0 and v_kmh > 4.8:
+        return 13.12 + 0.6215 * t - 11.37 * (v_kmh ** 0.16) + 0.3965 * t * (v_kmh ** 0.16)
+    return t
+
 async def get_weather_info(lang: str = "ko") -> str:
     """
     영도 날씨(풍속 포함) — UI는 main.py에서 카드로 구성
@@ -833,11 +840,11 @@ async def get_weather_info(lang: str = "ko") -> str:
             raw_weather = w.get("raw") if isinstance(w, dict) else {}
             if not isinstance(raw_weather, dict):
                 raw_weather = {}
-            # 기상청 실황: 체감온도 없음 → temp로 폴백
+            # 기상청 실황: 체감온도 없음 → wind chill(가능 시) 계산
             data = {
                 "main": {
                     "temp": raw_weather.get("temp"),
-                    "feels_like": raw_weather.get("temp"),
+                    "feels_like": raw_weather.get("feels_like"),
                 },
                 "wind": {"speed": raw_weather.get("wind_speed")},
             }
@@ -850,9 +857,13 @@ async def get_weather_info(lang: str = "ko") -> str:
             wind = {}
 
         temp = float(main.get("temp") or 0.0)
-        feels = float(main.get("feels_like") or temp)
+        feels_raw = main.get("feels_like")
+        feels = float(feels_raw) if feels_raw is not None else temp
         wind_speed = float(wind.get("speed") or 0.0)
         wind_text = _wind_intensity_desc_ko(wind_speed)
+
+        if feels_raw is None:
+            feels = float(_wind_chill_c(temp, wind_speed))
 
         return json.dumps(
             {
@@ -1500,7 +1511,7 @@ async def get_bus_190_tracker_busbusinfo(line_id: str = "5200190000", kmou_stop_
     )
 
 # =========================
-# 3) 맛집/의료/축제 (기존 기능 유지)
+# 3) 맛집/의료 (기존 기능 유지)
 # =========================
 
 def _read_places_csv(limit: int = 5) -> List[Dict[str, str]]:
@@ -1746,6 +1757,186 @@ async def search_restaurants(query: str, limit: int = 5):
         return json.dumps({"status": "success", "query": q, "restaurants": out}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
+
+async def get_random_yeongdo_restaurant(limit_pool: int = 15) -> str:
+    import random
+
+    kakao_key = (os.environ.get("KAKAO_REST_API_KEY") or "").strip()
+    limit_n = max(5, min(int(limit_pool or 15), 15))
+
+    def _is_cafe_blob(name: str, cat: str) -> bool:
+        blob = f"{name} {cat}".lower()
+        return ("카페" in blob) or ("커피" in blob) or ("cafe" in blob) or ("coffee" in blob)
+
+    if kakao_key:
+        try:
+            url = "https://dapi.kakao.com/v2/local/search/keyword.json"
+            headers = {"Authorization": f"KakaoAK {kakao_key}"}
+            async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers) as client:
+                res = await client.get(
+                    url,
+                    params={
+                        "query": "영도구 맛집",
+                        "x": str(_KMOU_LON),
+                        "y": str(_KMOU_LAT),
+                        "radius": str(max(1000, min(int(os.environ.get("ARA_KAKAO_YEONGDO_RADIUS_M", "20000")), 20000))),
+                        "size": str(limit_n),
+                    },
+                    timeout=2.5,
+                )
+            res.raise_for_status()
+            data = res.json() if res is not None else {}
+            docs = (data.get("documents") or []) if isinstance(data, dict) else []
+            candidates: List[Dict[str, Any]] = []
+            for d in docs:
+                name = (d.get("place_name") or "").strip()
+                addr = (d.get("road_address_name") or d.get("address_name") or "").strip()
+                phone = (d.get("phone") or "").strip()
+                link = (d.get("place_url") or "").strip()
+                cat = (d.get("category_name") or d.get("category_group_name") or "").strip()
+                if addr and ("영도구" not in addr) and ("영도" not in addr):
+                    continue
+                if _is_cafe_blob(name, cat):
+                    continue
+                if not name:
+                    continue
+                candidates.append({"name": name, "addr": addr, "tel": phone, "link": link, "source": "kakao"})
+            if candidates:
+                picked = random.choice(candidates)
+                return json.dumps({"status": "success", "restaurant": picked}, ensure_ascii=False)
+        except Exception:
+            pass
+
+    try:
+        path = os.path.join(os.path.dirname(__file__), "places.csv")
+        if not os.path.exists(path):
+            return json.dumps({"status": "empty", "msg": "정보 없음"}, ensure_ascii=False)
+        with open(path, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        candidates = []
+        for r in rows:
+            name = (r.get("name") or r.get("temp-fixname") or "").strip()
+            cat = (r.get("category") or "").strip()
+            desc = (r.get("description") or "").strip()
+            rec = (r.get("recommendation") or "").strip()
+            if not name:
+                continue
+            if _is_cafe_blob(name, cat):
+                continue
+            if not any(k in (desc or "") for k in ["영도구", "영도", "해양대", "동삼동", "흰여울"]):
+                continue
+            candidates.append({"name": name, "addr": desc, "tel": "", "link": "", "source": "places.csv", "recommendation": rec})
+        if not candidates:
+            return json.dumps({"status": "empty", "msg": "정보 없음"}, ensure_ascii=False)
+        picked = random.choice(candidates)
+        return json.dumps({"status": "success", "restaurant": picked}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"status": "empty", "msg": "정보 없음"}, ensure_ascii=False)
+
+async def get_worknet_maritime_logistics_jobs(query: Optional[str] = None, limit: int = 5, lang: str = "ko") -> str:
+    import requests
+    import xml.etree.ElementTree as ET
+    from urllib.parse import quote
+
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+
+    auth_key = (os.environ.get("WORKNET_API_KEY") or os.environ.get("WORKNET_AUTH_KEY") or "").strip()
+    if not auth_key:
+        return json.dumps(
+            {"status": "error", "msg": ("정보를 확인 중입니다" if lang != "en" else "Data is being verified.")},
+            ensure_ascii=False,
+        )
+
+    q = (query or "").strip()
+    if not q:
+        q = "해운 물류"
+
+    url = "http://openapi.work.go.kr/opi/opi/opia/wantedApi.do"
+    timeout_s = float(os.environ.get("ARA_WORKNET_TIMEOUT_SECONDS", "3.5"))
+    display = str(max(5, min(int(limit or 5) * 3, 30)))
+    params = {
+        "authKey": auth_key,
+        "callTp": "L",
+        "returnType": "XML",
+        "startPage": "1",
+        "display": display,
+        "keyword": q,
+    }
+
+    def _fetch_xml() -> str:
+        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout_s, verify=HTTPX_VERIFY)
+        r.raise_for_status()
+        return r.text or ""
+
+    try:
+        xml_text = await asyncio.to_thread(_fetch_xml)
+    except Exception:
+        return json.dumps(
+            {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch job listings right now.")},
+            ensure_ascii=False,
+        )
+
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return json.dumps(
+            {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch job listings right now.")},
+            ensure_ascii=False,
+        )
+
+    def _txt(path: str) -> str:
+        return (root.findtext(path) or "").strip()
+
+    code = _txt(".//resultCode")
+    if code and code not in {"00", "0"}:
+        return json.dumps(
+            {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch job listings right now.")},
+            ensure_ascii=False,
+        )
+
+    keywords = ["해운", "항만", "물류", "포워딩", "선사", "해상", "maritime", "logistics", "shipping", "port"]
+    out: List[Dict[str, Any]] = []
+
+    for it in root.findall(".//wanted"):
+        title = (it.findtext("wantedTitle") or it.findtext("title") or "").strip()
+        company = (it.findtext("company") or it.findtext("companyNm") or it.findtext("corpNm") or "").strip()
+        region = (it.findtext("region") or it.findtext("workRegion") or "").strip()
+        end_date = (it.findtext("endDate") or it.findtext("receiptCloseDt") or "").strip()
+        wanted_auth_no = (it.findtext("wantedAuthNo") or it.findtext("wantedno") or "").strip()
+        info_url = (it.findtext("wantedInfoUrl") or "").strip()
+
+        blob = f"{title} {company}".lower()
+        if not any(k in blob for k in [k.lower() for k in keywords]):
+            continue
+
+        link = info_url
+        if not link and wanted_auth_no:
+            link = "https://www.work.go.kr/empInfo/empInfoSrch/list/dtlEmpSrch.do?wantedAuthNo=" + quote(wanted_auth_no)
+
+        out.append(
+            {
+                "title": title,
+                "company": company,
+                "region": region,
+                "end_date": end_date,
+                "link": link,
+                "wanted_auth_no": wanted_auth_no,
+                "source": "worknet",
+            }
+        )
+        if len(out) >= max(1, min(int(limit or 5), 5)):
+            break
+
+    if not out:
+        return json.dumps(
+            {"status": "empty", "msg": ("현재 진행 중인 해운/물류 채용 공고가 없습니다." if lang != "en" else "No maritime/logistics jobs found."), "jobs": []},
+            ensure_ascii=False,
+        )
+
+    return json.dumps({"status": "success", "query": q, "jobs": out}, ensure_ascii=False)
 
 async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang: str = "ko", strict_yeongdo: Optional[bool] = None):
     """
@@ -2054,219 +2245,6 @@ async def get_medical_info(kind: str = "약국"):
         return json.dumps({"status": "success", "hospitals": targets[:5]}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
-
-async def get_festival_info():
-    if not DATA_GO_KR_SERVICE_KEY:
-        return json.dumps({"status": "error", "msg": "공공데이터 API 키가 없어 조회할 수 없습니다."}, ensure_ascii=False)
-
-    url = "http://apis.data.go.kr/6260000/FestivalService/getFestivalKr"
-    params = {"serviceKey": DATA_GO_KR_SERVICE_KEY, "numOfRows": "10", "pageNo": "1", "resultType": "json"}
-    res = await _http_get_json(url, params, timeout=10.0)
-
-    # 1) 1차(기존) API 파싱
-    try:
-        if res["status"] != "success":
-            raise RuntimeError(res.get("msg", "API 호출 실패"))
-        items = _safe_get(res, "data", "getFestivalKr", "item", default=[]) or []
-        targets: List[Dict[str, Any]] = []
-        for i in items:
-            title = i.get("MAIN_TITLE")
-            place = i.get("MAIN_PLACE")
-            date_text = i.get("USAGE_DAY_WEEK_AND_TIME")
-
-            dt = _extract_ymd(str(date_text or ""))
-            if not dt:
-                continue
-            if dt.strftime("%Y%m%d") < "20260120":
-                continue
-            targets.append({"title": title, "place": place, "date": date_text, "date_ymd": dt.strftime("%Y%m%d")})
-        if targets:
-            return json.dumps({"status": "success", "festivals": targets[:5]}, ensure_ascii=False)
-    except Exception:
-        pass
-
-    # 2) 폴백: 문화정보조회서비스(area2)
-    # - 이 API는 별도 이용신청이 필요할 수 있으며(403), 실패 시 정직하게 보고합니다.
-    culture_key = (os.environ.get("CULTUREINFO_SERVICE_KEY") or "").strip() or DATA_GO_KR_SERVICE_KEY
-    try:
-        import xml.etree.ElementTree as ET
-
-        fallback_url = "https://apis.data.go.kr/B553457/cultureinfo/area2"
-        now = _reference_datetime()
-        start_ymd = now.strftime("%Y%m%d")
-        if start_ymd < "20260120":
-            start_ymd = "20260120"
-        end_ymd = (now + timedelta(days=60)).strftime("%Y%m%d")
-
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
-            r = await client.get(
-                fallback_url,
-                params={"serviceKey": culture_key, "pageNo": "1", "numOfrows": "20", "place": "부산광역시", "from": start_ymd, "to": end_ymd},
-                timeout=5.0,
-            )
-
-        if r.status_code == 403:
-            return json.dumps(
-                {
-                    "status": "empty",
-                    "msg": "축제/행사 대체 API(문화정보조회서비스)는 현재 이용 권한이 없어 조회할 수 없습니다. 공공데이터포털에서 해당 API 이용신청이 필요합니다.",
-                },
-                ensure_ascii=False,
-            )
-
-        root = ET.fromstring(r.text or "")
-        items_el = root.find(".//items")
-        if items_el is None:
-            return json.dumps({"status": "empty", "msg": "2026-01-20 이후의 확정 일정만 제공할 수 있습니다."}, ensure_ascii=False)
-
-        out: List[Dict[str, Any]] = []
-        for it in items_el.findall(".//item"):
-            raw_map = {c.tag: (c.text or "").strip() for c in list(it) if c.tag}
-            title = raw_map.get("title") or raw_map.get("TITLE") or raw_map.get("subject") or raw_map.get("programNm") or ""
-            place = raw_map.get("place") or raw_map.get("PLACE") or raw_map.get("placeNm") or raw_map.get("addr") or ""
-            date_text = raw_map.get("date") or raw_map.get("startDate") or raw_map.get("eventStartDate") or raw_map.get("start") or ""
-
-            dt = _extract_ymd(date_text)
-            if not dt:
-                continue
-            if dt.strftime("%Y%m%d") < "20260120":
-                continue
-            out.append({"title": title or "행사", "place": place, "date": date_text, "date_ymd": dt.strftime("%Y%m%d")})
-            if len(out) >= 5:
-                break
-
-        if not out:
-            return json.dumps({"status": "empty", "msg": "2026-01-20 이후의 확정 일정만 제공할 수 있습니다."}, ensure_ascii=False)
-        return json.dumps({"status": "success", "festivals": out}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"status": "empty", "msg": f"행사 조회 폴백 실패: {str(e)}"}, ensure_ascii=False)
-
-async def get_busan_festivals(lang: str = "ko"):
-    lang = (lang or "ko").strip().lower()
-    if lang not in {"ko", "en"}:
-        lang = "ko"
-
-    service_key = (os.getenv("DATA_GO_KR_SERVICE_KEY") or "").strip()
-    if not service_key:
-        return json.dumps(
-            {
-                "status": "error",
-                "msg": "공공데이터 API 키(DATA_GO_KR_SERVICE_KEY)가 없어 조회할 수 없습니다." if lang != "en" else "DATA_GO_KR_SERVICE_KEY is missing.",
-            },
-            ensure_ascii=False,
-        )
-
-    def _fmt_ymd(yyyymmdd: str) -> str:
-        s = re.sub(r"\\D+", "", str(yyyymmdd or ""))
-        if len(s) != 8:
-            return ""
-        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
-
-    from urllib.parse import quote
-    import requests
-
-    ref_yyyymmdd = _reference_datetime().strftime("%Y%m%d")
-    if ref_yyyymmdd < "20260120":
-        ref_yyyymmdd = "20260120"
-
-    start_query = ref_yyyymmdd[:4] + "0101"
-    url = "http://apis.data.go.kr/B551011/KorService1/searchFestival1"
-    params = {
-        "serviceKey": service_key,
-        "numOfRows": "80",
-        "pageNo": "1",
-        "MobileOS": "ETC",
-        "MobileApp": "ARA",
-        "_type": "json",
-        "eventStartDate": start_query,
-        "areaCode": "6",
-    }
-
-    try:
-        timeout_s = float(os.environ.get("ARA_KTO_TIMEOUT_SECONDS", "3.5"))
-
-        def _fetch_json():
-            r = requests.get(url, params=params, headers=HEADERS, timeout=timeout_s, verify=HTTPX_VERIFY)
-            r.raise_for_status()
-            return r.json()
-
-        data = await asyncio.to_thread(_fetch_json)
-
-        body = _safe_get(data, "response", "body", default={}) or {}
-        total = _safe_get(body, "totalCount", default=0)
-        try:
-            total_i = int(str(total)) if total is not None else 0
-        except Exception:
-            total_i = 0
-
-        print(f"[ARA Log] KTO searchFestival1 totalCount={total_i} ref={ref_yyyymmdd}")
-
-        items = _safe_get(body, "items", "item", default=[]) or []
-        if isinstance(items, dict):
-            items = [items]
-        if not isinstance(items, list):
-            items = []
-
-        out_festivals: List[Dict[str, Any]] = []
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            title = (it.get("title") or "").strip()
-            addr1 = (it.get("addr1") or "").strip()
-            start = (it.get("eventstartdate") or "").strip()
-            end = (it.get("eventenddate") or "").strip()
-            sd = re.sub(r"\\D+", "", start)
-            ed = re.sub(r"\\D+", "", end)
-            if len(sd) != 8 or len(ed) != 8:
-                continue
-            if ed < ref_yyyymmdd:
-                continue
-            if sd <= ref_yyyymmdd <= ed:
-                state = "ongoing"
-            elif sd > ref_yyyymmdd:
-                state = "upcoming"
-            else:
-                state = "ongoing"
-
-            q = addr1 or title or "부산 축제"
-            link = "https://map.kakao.com/link/search/" + quote(q)
-
-            out_festivals.append(
-                {
-                    "title": title or "축제",
-                    "addr1": addr1,
-                    "eventstartdate": sd,
-                    "eventenddate": ed,
-                    "state": state,
-                    "date_text": f"📅 {_fmt_ymd(sd)} ~ {_fmt_ymd(ed)}",
-                    "place": addr1,
-                    "link": link,
-                }
-            )
-
-        if not out_festivals:
-            return json.dumps({"status": "empty", "msg": "현재 진행 중이거나 예정된 부산 축제가 없습니다."}, ensure_ascii=False)
-
-        out_festivals.sort(key=lambda x: (0 if x.get("state") == "ongoing" else 1, (x.get("title") or "")))
-        out_festivals = out_festivals[:5]
-
-        return json.dumps(
-            {
-                "status": "success",
-                "source": "kto_searchFestival1",
-                "refDate": ref_yyyymmdd,
-                "eventStartDate": start_query,
-                "totalCount": total_i,
-                "festivals": out_festivals,
-            },
-            ensure_ascii=False,
-        )
-    except json.JSONDecodeError:
-        return json.dumps({"status": "error", "msg": "현재 축제 정보를 불러올 수 없습니다."}, ensure_ascii=False)
-    except requests.Timeout:
-        return json.dumps({"status": "error", "msg": "현재 축제 정보를 불러올 수 없습니다."}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"status": "error", "msg": "현재 축제 정보를 불러올 수 없습니다."}, ensure_ascii=False)
 
 # =========================
 # 4) 셔틀/캠퍼스맵 (이미지 기반 기능 추가)
@@ -2637,22 +2615,6 @@ TOOLS_SPEC = [
                     "lang": {"type": "string", "description": "ko 또는 en(선택)"},
                 },
             },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_festival_info",
-            "description": "🎉 Festival/Events: 부산 행사/축제 정보를 조회하고, 2026-01-20 이후 일정만 제공합니다(폴백 포함).",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_busan_festivals",
-            "description": "🎉 부산 축제(KTO): 한국관광공사 searchFestival1으로 부산(areaCode=6) 축제를 5개 조회합니다(썸네일/기간 포함).",
-            "parameters": {"type": "object", "properties": {"lang": {"type": "string", "description": "ko 또는 en(선택)"}}},
         },
     },
     {
