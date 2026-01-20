@@ -4,7 +4,19 @@ import asyncio
 import re
 import uuid
 from openai import AsyncOpenAI
-from tools import TOOLS_SPEC, get_bus_arrival, get_cheap_eats, get_medical_info, get_kmou_weather, get_festival_info
+from tools import (
+    TOOLS_SPEC,
+    get_bus_arrival,
+    get_cheap_eats,
+    get_medical_info,
+    get_kmou_weather,
+    get_festival_info,
+    get_shuttle_next_buses,
+    search_restaurants,
+    get_calendar_day_2026,
+    get_astronomy_data,
+    get_campus_contacts,
+)
 from database import init_db, save_conversation_pair, get_success_examples, get_history, save_history
 
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -15,7 +27,12 @@ TOOL_MAP = {
     "get_cheap_eats": get_cheap_eats,
     "get_medical_info": get_medical_info,
     "get_kmou_weather": get_kmou_weather,
-    "get_festival_info": get_festival_info
+    "get_festival_info": get_festival_info,
+    "get_shuttle_next_buses": get_shuttle_next_buses,
+    "search_restaurants": search_restaurants,
+    "get_calendar_day_2026": get_calendar_day_2026,
+    "get_astronomy_data": get_astronomy_data,
+    "get_campus_contacts": get_campus_contacts,
 }
 
 _BANNED_ADDRESSING_PATTERNS = [
@@ -430,6 +447,11 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
             "- 데이터 실패 시: 도구 결과가 empty/error이면, 실패 사유를 간단히 설명하고 가능한 대안을 제시하되 추측은 금지합니다.\n"
             "- 데이터 부재 시 응답: 필요한 raw data가 없으면 '모르겠습니다/확인할 수 없습니다'라고 답하십시오.\n"
             "- 내부 절차 노출 금지: 내부 분석/검증 절차를 사용자에게 단계별로 노출하지 말고 최종 답변만 제공하십시오.\n\n"
+            "## 날짜/공휴일 진실 소스(Source-of-Truth)\n"
+            "- 공휴일/휴일/연휴/특정 날짜의 행사 여부 등 '날짜 기반' 정보는 절대 계산하거나 추측하지 마십시오.\n"
+            "- 반드시 tools.py의 `get_calendar_day_2026` 또는 `get_astronomy_data`를 호출해 확인된 값만 사용하십시오.\n"
+            "- 해당 날짜가 `calendar_2026.json`에 없거나 도구가 success가 아니면, 다음 문구로만 답하십시오:\n"
+            "  - Data is currently being updated for this specific date.\n\n"
             "## 버튼 입력 우선 처리\n"
             "- 사용자가 버튼(퀵플라이)을 통해 입력한 메시지는 최우선적으로 해당 기능 호출 의도로 간주하십시오.\n"
             "- 예: '190번 버스 IN/OUT', '지금 학교 날씨 어때?', '영도 착한가격 식당 추천해줘', '학교 근처 약국이나 병원 알려줘', '지금 부산에 하는 축제 있어?'\n\n"

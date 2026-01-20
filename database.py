@@ -7,6 +7,17 @@ def init_db():
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS history (user_id TEXT PRIMARY KEY, messages TEXT)")
 
+    # 멀티턴 상태 저장(멀티 워커 안전)
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS pending_state (
+            user_id TEXT PRIMARY KEY,
+            kind TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+        """
+    )
+
     # 대화/피드백 저장 테이블 (Self-Improvement Loop)
     cursor.execute(
         """
@@ -42,6 +53,40 @@ def init_db():
     if "created_at" not in cols:
         cursor.execute("ALTER TABLE conversations ADD COLUMN created_at TEXT")
 
+    conn.commit()
+    conn.close()
+
+def get_pending_state(user_id: str) -> Optional[str]:
+    if not user_id:
+        return None
+    conn = sqlite3.connect("history.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT kind, updated_at FROM pending_state WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return None
+    kind, updated_at = row[0], row[1]
+    return kind or None
+
+def set_pending_state(user_id: str, kind: str) -> None:
+    if not user_id:
+        return
+    conn = sqlite3.connect("history.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO pending_state (user_id, kind, updated_at) VALUES (?, ?, datetime('now'))",
+        (user_id, kind),
+    )
+    conn.commit()
+    conn.close()
+
+def clear_pending_state(user_id: str) -> None:
+    if not user_id:
+        return
+    conn = sqlite3.connect("history.db")
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pending_state WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
 
