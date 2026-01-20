@@ -3,6 +3,7 @@ import json
 import asyncio
 import re
 import uuid
+from typing import Any, Optional, Dict
 from openai import AsyncOpenAI
 from tools import (
     TOOLS_SPEC,
@@ -248,7 +249,14 @@ def _format_bus_response(payload: dict, bus_number: str | None, direction: str, 
             out_lines.append(f"  - {b.get('bus_no','')} / {b.get('status','정보없음')} / {b.get('low_plate','')}")
     return "\n".join(out_lines).strip()
 
-async def ask_ara(user_input, history=None, user_id: str | None = None, return_meta: bool = False, session_lang: str = "ko"):
+async def ask_ara(
+    user_input,
+    history=None,
+    user_id: str | None = None,
+    return_meta: bool = False,
+    session_lang: str = "ko",
+    current_context: Optional[Dict[str, Any]] = None,
+):
     if history is None:
         if user_id:
             try:
@@ -530,10 +538,38 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
         )
     )
 
+    # 실시간 컨텍스트(시간 인지) — main.py에서 KST로 계산된 값만 주입
+    ctx_lines: list[str] = []
+    if isinstance(current_context, dict) and current_context:
+        now_kst = str(current_context.get("now_kst") or "").strip()
+        day_type = str(current_context.get("current_day") or current_context.get("day_type") or "").strip()
+        current_time_str = str(current_context.get("current_time_str") or "").strip()
+        tz = str(current_context.get("tz") or "Asia/Seoul").strip()
+        if now_kst:
+            if lang == "en":
+                ctx_lines.append(f"- Now: {now_kst} ({tz})")
+            else:
+                ctx_lines.append(f"- 현재 시각: {now_kst} ({tz})")
+        if current_time_str:
+            if lang == "en":
+                ctx_lines.append(f"- Current time: {current_time_str}")
+            else:
+                ctx_lines.append(f"- 현재 시간(HH:MM): {current_time_str}")
+        if day_type:
+            if lang == "en":
+                ctx_lines.append(f"- Day type: {day_type}")
+            else:
+                ctx_lines.append(f"- 요일 구분: {'주말' if day_type.lower() == 'weekend' else '평일'}")
+
+    current_context_block = ""
+    if ctx_lines:
+        current_context_block = ("## Current context\n" if lang == "en" else "## 현재 컨텍스트\n") + "\n".join(ctx_lines) + "\n\n"
+
     system_prompt = {
         "role": "system",
         "content": (
             persona
+            + current_context_block
             + ("## Absolute rules\n" if lang == "en" else "## 절대 규칙\n")
             + "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '사용자님' 또는 무호칭입니다.\n"
             + "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 필요한 경우 '확인할 수 없습니다'라고 명시하십시오.\n"
@@ -649,5 +685,5 @@ async def ask_ara(user_input, history=None, user_id: str | None = None, return_m
         return response_text
 
     except Exception as e:
-        print(f"Agent Error: {e}")
+        print(f"[ARA Log] Agent Error: {e}")
         return "죄송합니다. 시스템 과부하로 인해 답변을 드리기 어렵습니다."
