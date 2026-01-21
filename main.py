@@ -824,12 +824,27 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         elif dict_intent == "취업":
             msg = orig_msg
 
-    # Bus 190 - Support both Korean and English keywords
+    # Bus 190 - Strictly separate from Shuttle (English Logic Fix)
     msg_lower = msg.lower()
-    is_bus_190_query = (
-        (("190" in msg) and (("해양대구본관" in msg) or ("구본관" in msg)) and any(k in msg for k in ["출발", "시간표", "언제", "다음", "몇분", "몇 분"]))
-        or (("190" in msg_lower or "bus" in msg_lower or "shuttle" in msg_lower) and any(k in msg_lower for k in ["depart", "schedule", "when", "next", "time", "old main", "kmou main"]))
-    )
+    
+    # Strict mapping rules for English inputs
+    is_bus_190_query = False
+    if lang == "en":
+        # English: Only trigger Bus 190 for specific keywords
+        is_bus_190_query = (
+            ("190" in msg_lower) or
+            ("bus 190" in msg_lower) or
+            ("public" in msg_lower and "190" in msg_lower) or
+            (any(k in msg_lower for k in ["old main", "kmou main"]) and "bus" in msg_lower)
+        )
+        # Explicitly exclude Shuttle keywords
+        if any(k in msg_lower for k in ["shuttle", "campus bus", "school bus", "circulation"]):
+            is_bus_190_query = False
+    else:
+        # Korean: Original logic
+        is_bus_190_query = (
+            (("190" in msg) and (("해양대구본관" in msg) or ("구본관" in msg)) and any(k in msg for k in ["출발", "시간표", "언제", "다음", "몇분", "몇 분"]))
+        )
     
     if is_bus_190_query:
         from tools import get_bus_190_kmou_main_next_departures
@@ -1099,19 +1114,38 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         if not isinstance(payload, dict) or payload.get("status") != "success":
             return _kakao_basic_card(
                 title=("Weather" if lang == "en" else "날씨"),
-                description=_normalize_desc((payload.get("msg") if isinstance(payload, dict) else None) or "정보를 확인 중입니다"),
+                description=_normalize_desc((payload.get("msg") if isinstance(payload, dict) else None) or ("Information not available" if lang == "en" else "정보를 확인 중입니다")),
                 buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
             )
-        desc = (
-            f"온도 {payload.get('temp', 0):.1f}°C (체감 {payload.get('feels_like', 0):.1f}°C) / "
-            f"바람 {payload.get('wind_speed', 0):.1f}m/s ({payload.get('wind_text','')})"
-        )
+        
+        # Weather Diversity: Include condition description
+        condition = payload.get("condition", "")
+        temp = payload.get("temp", 0)
+        feels_like = payload.get("feels_like", 0)
+        wind_speed = payload.get("wind_speed", 0)
+        wind_text = payload.get("wind_text", "")
+        
+        if lang == "en":
+            desc_parts = []
+            if condition:
+                desc_parts.append(condition)
+            desc_parts.append(f"Temperature: {temp:.1f}°C (Feels like: {feels_like:.1f}°C)")
+            desc_parts.append(f"Wind: {wind_speed:.1f}m/s ({wind_text})")
+            desc = " / ".join(desc_parts)
+        else:
+            desc_parts = []
+            if condition:
+                desc_parts.append(condition)
+            desc_parts.append(f"온도 {temp:.1f}°C (체감 {feels_like:.1f}°C)")
+            desc_parts.append(f"바람 {wind_speed:.1f}m/s ({wind_text})")
+            desc = " / ".join(desc_parts)
+        
         return _kakao_basic_card(
             title=("Weather (Real-time)" if lang == "en" else "해양대 날씨(실황)"),
-            description=_normalize_desc_preserve_lines(str(desc)),
+            description=_normalize_desc_preserve_lines(desc),
             buttons=[
-                {"action": "webLink", "label": "기상청", "webLinkUrl": "https://www.weather.go.kr"},
-                {"action": "message", "label": "다시 조회", "messageText": msg},
+                {"action": "webLink", "label": "기상청" if lang != "en" else "KMA", "webLinkUrl": "https://www.weather.go.kr"},
+                {"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg},
             ],
         )
 
@@ -1395,7 +1429,25 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             ]
         )
 
-    if ("셔틀" in msg) or ("순환" in msg) or ("shuttle" in msg.lower()):
+    # Shuttle Bus - Strictly separate from Bus 190 (English Logic Fix)
+    msg_lower = msg.lower()
+    is_shuttle_query = False
+    if lang == "en":
+        # English: Only trigger Shuttle for specific keywords
+        is_shuttle_query = (
+            ("shuttle" in msg_lower) or
+            ("campus bus" in msg_lower) or
+            ("school bus" in msg_lower) or
+            ("circulation" in msg_lower)
+        )
+        # Explicitly exclude Bus 190 keywords
+        if any(k in msg_lower for k in ["190", "bus 190", "public", "old main", "kmou main"]):
+            is_shuttle_query = False
+    else:
+        # Korean: Original logic
+        is_shuttle_query = ("셔틀" in msg) or ("순환" in msg)
+    
+    if is_shuttle_query:
         # 요구사항: 다음 셔틀 1회만 안내(테이블 덤프 금지)
         raw = await get_shuttle_schedule(lang=lang)
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})

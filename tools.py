@@ -796,11 +796,73 @@ def _wind_chill_c(temp_c: float, wind_speed_ms: float) -> float:
         return 13.12 + 0.6215 * t - 11.37 * (v_kmh ** 0.16) + 0.3965 * t * (v_kmh ** 0.16)
     return t
 
+def _parse_weather_condition(weather_data: Dict[str, Any], lang: str = "ko") -> str:
+    """
+    날씨 조건 코드를 파싱하여 설명 텍스트 생성.
+    - Rain, Snow, Drizzle, Thunderstorm 등을 구분
+    - 강수확률 정보 포함
+    """
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+    
+    weather_list = weather_data.get("weather", [])
+    if not isinstance(weather_list, list) or not weather_list:
+        return ""
+    
+    weather_main = weather_list[0].get("main", "").upper() if isinstance(weather_list[0], dict) else ""
+    weather_desc = weather_list[0].get("description", "").lower() if isinstance(weather_list[0], dict) else ""
+    
+    # 강수확률 추출
+    pop = weather_data.get("pop")  # probability of precipitation
+    pop_percent = int(float(pop * 100)) if pop is not None else None
+    
+    # 날씨 조건별 이모지 및 설명
+    condition_map_ko = {
+        "RAIN": ("☔", f"비가 오고 있어"),
+        "DRIZZLE": ("🌧️", f"이슬비가 내려"),
+        "SNOW": ("☃️", f"눈이 내려"),
+        "THUNDERSTORM": ("⛈️", f"천둥번개가 있어"),
+        "CLEAR": ("☀️", "맑아"),
+        "CLOUDS": ("☁️", "흐려"),
+        "MIST": ("🌫️", "안개가 껴"),
+        "FOG": ("🌫️", "안개가 껴"),
+        "HAZE": ("🌫️", "옅은 안개가 있어"),
+    }
+    
+    condition_map_en = {
+        "RAIN": ("☔", f"Raining"),
+        "DRIZZLE": ("🌧️", f"Drizzling"),
+        "SNOW": ("☃️", f"Snowing"),
+        "THUNDERSTORM": ("⛈️", f"Thunderstorm"),
+        "CLEAR": ("☀️", "Clear"),
+        "CLOUDS": ("☁️", "Cloudy"),
+        "MIST": ("🌫️", "Misty"),
+        "FOG": ("🌫️", "Foggy"),
+        "HAZE": ("🌫️", "Hazy"),
+    }
+    
+    condition_map = condition_map_en if lang == "en" else condition_map_ko
+    
+    if weather_main in condition_map:
+        emoji, desc = condition_map[weather_main]
+        if pop_percent is not None and weather_main in ["RAIN", "DRIZZLE", "SNOW", "THUNDERSTORM"]:
+            if lang == "en":
+                return f"{emoji} {desc} (Precipitation probability: {pop_percent}%)"
+            else:
+                return f"{emoji} {desc} (강수확률 {pop_percent}%)"
+        elif weather_main == "SNOW":
+            return f"{emoji} {desc}! 미끄럼 조심해." if lang != "en" else f"{emoji} {desc}! Be careful of slippery roads."
+        return f"{emoji} {desc}"
+    
+    return ""
+
 async def get_weather_info(lang: str = "ko") -> str:
     """
-    영도 날씨(풍속 포함) — UI는 main.py에서 카드로 구성
+    영도 날씨(풍속, 체감온도, 날씨 조건 포함) — UI는 main.py에서 카드로 구성
     - 반환: json 문자열
     - 안정성: OpenWeatherMap(있으면) → KMA(get_kmou_weather) 폴백
+    - Weather Diversity: 날씨 조건 코드 파싱 (비, 눈, 천둥 등)
     """
     lang = (lang or "ko").strip().lower()
     if lang not in {"ko", "en"}:
@@ -833,7 +895,7 @@ async def get_weather_info(lang: str = "ko") -> str:
             payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
             if not isinstance(payload, dict) or payload.get("status") != "success":
                 return json.dumps(
-                    {"status": "error", "msg": "날씨 정보를 확인 중입니다."},
+                    {"status": "error", "msg": "Information not available" if lang == "en" else "날씨 정보를 확인 중입니다."},
                     ensure_ascii=False,
                 )
             w = payload.get("weather") or {}
@@ -865,6 +927,9 @@ async def get_weather_info(lang: str = "ko") -> str:
         if feels_raw is None:
             feels = float(_wind_chill_c(temp, wind_speed))
 
+        # 날씨 조건 파싱
+        condition_desc = _parse_weather_condition(data, lang=lang)
+
         return json.dumps(
             {
                 "status": "success",
@@ -872,11 +937,12 @@ async def get_weather_info(lang: str = "ko") -> str:
                 "feels_like": feels,
                 "wind_speed": wind_speed,
                 "wind_text": wind_text,
+                "condition": condition_desc,
             },
             ensure_ascii=False,
         )
     except Exception:
-        return json.dumps({"status": "error", "msg": "날씨 정보를 확인 중입니다."}, ensure_ascii=False)
+        return json.dumps({"status": "error", "msg": "Information not available" if lang == "en" else "날씨 정보를 확인 중입니다."}, ensure_ascii=False)
 
 # =========================
 # 2) 버스 필터링 로직 최적화 (ODsay) — 요청 교정본 반영
@@ -2241,17 +2307,33 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
 
         async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers, timeout=timeout_seconds) as client:
             response = await client.get(api_url, params=params)
+            
+            # Step 1: Print HTTP Status Code
+            status_code = response.status_code
+            print(f"[ARA Debug] Youth Jobs API HTTP Status: {status_code}")
+            
+            if status_code in [401, 403]:
+                print(f"[ARA Debug] API Key Error: Status {status_code}")
+                raise RuntimeError("API Key Error")
+            
             response.raise_for_status()
 
-            if response.status_code != 200:
-                raise RuntimeError(f"HTTP {response.status_code}")
+            if status_code != 200:
+                raise RuntimeError(f"HTTP {status_code}")
 
             xml_text = response.text or ""
-            if not xml_text.strip():
+            
+            # Step 2: Print Raw Response Text length
+            xml_text_length = len(xml_text.strip())
+            print(f"[ARA Debug] Youth Jobs API Response Length: {xml_text_length} bytes")
+            
+            if xml_text_length == 0:
+                print(f"[ARA Debug] Empty Response from Server")
                 raise RuntimeError("Empty response")
 
             # Check if response is HTML (error page)
             if xml_text.lstrip().lower().startswith("<html"):
+                print(f"[ARA Debug] HTML response received instead of XML")
                 raise RuntimeError("HTML response received instead of XML")
 
     except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as e:
@@ -2275,7 +2357,13 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
 
     # Robust XML Parsing
     try:
-        parsed = xmltodict.parse(xml_text)
+        # Step 3: Check XML Parsing
+        try:
+            parsed = xmltodict.parse(xml_text)
+        except Exception as parse_error:
+            print(f"[ARA Debug] XML Structure Changed - Parsing failed: {parse_error}")
+            print(f"[ARA Debug] XML Preview (first 500 chars): {xml_text[:500]}")
+            raise RuntimeError("XML Structure Changed")
         
         # Navigate to youthPolicyList
         youth_policy_list = None
@@ -2314,9 +2402,13 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
             except (ValueError, TypeError):
                 total_cnt = 0
         
-        # If totalCnt is 0, try fallback search with '청년'
-        if total_cnt == 0 and q != "청년":
-            return await get_youth_jobs("청년")
+        # Step 4: If totalCnt is 0, try fallback search with '청년' or '취업'
+        if total_cnt == 0:
+            print(f"[ARA Debug] Total count is 0 for keyword: {q}")
+            fallback_keywords = ["청년", "취업"] if q not in ["청년", "취업"] else ["청년"] if q == "취업" else []
+            for fallback_q in fallback_keywords:
+                print(f"[ARA Debug] Trying fallback search with keyword: {fallback_q}")
+                return await get_youth_jobs(fallback_q)
 
         # Extract youthPolicy - handle both single dict and list
         youth_policies = []
