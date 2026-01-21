@@ -67,19 +67,17 @@ def _abs_url(path: str) -> str:
         return _PUBLIC_BASE_URL + p
     return p
 
-# Ocean-themed Visual Assets (ARA Identity)
-_IMG_CUTE_BASE = "https://uwx.github.io/fluentui-twemoji-3d/export/3D_png/72x72/"
-
-# 귀여운(3D 이모지) 카드 썸네일 — 버튼별 시각 아이덴티티
-IMG_KMOU_HOME = _IMG_CUTE_BASE + "1f3eb.png"        # 🏫 홈피(학교)
-IMG_DEFAULT_WAVE = _IMG_CUTE_BASE + "1f30a.png"     # 🌊 기본(파도)
-IMG_CONTACT = _IMG_CUTE_BASE + "1f4de.png"          # 📞 연락처
-IMG_CAFETERIA = _IMG_CUTE_BASE + "1f371.png"        # 🍱 학식(도시락)
-IMG_FOOD = _IMG_CUTE_BASE + "1f35c.png"             # 🍜 맛집(라멘)
-IMG_CAREER = _IMG_CUTE_BASE + "1f4bc.png"           # 💼 취업/정책(서류가방)
-IMG_WEATHER = _IMG_CUTE_BASE + "1f324.png"          # 🌤️ 날씨
-IMG_BUS_190_FALLBACK = _IMG_CUTE_BASE + "1f68c.png" # 🚌 190(버스)
-IMG_SHUTTLE_FALLBACK = _IMG_CUTE_BASE + "1f690.png" # 🚐 셔틀(미니버스)
+# Realistic photo thumbnails (object/context matched)
+# - 카드 기능/맥락에 맞는 "실사 사진"으로 통일합니다.
+IMG_KMOU_HOME = "https://images.unsplash.com/photo-1533596572767-021096785655?q=80&w=600&auto=format&fit=crop"  # 바다 윤슬(홈피/학교)
+IMG_DEFAULT_WAVE = "https://images.unsplash.com/photo-1505228395891-9a51e7e86bf6?q=80&w=600&auto=format&fit=crop"  # 파도(기본)
+IMG_CONTACT = "https://images.unsplash.com/photo-1512499617640-c2f9990986a4?q=80&w=600&auto=format&fit=crop"  # 전화/연락처
+IMG_CAFETERIA = "https://images.unsplash.com/photo-1547573854-74d2a71d0826?q=80&w=600&auto=format&fit=crop"  # 학식
+IMG_FOOD = "https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=600&auto=format&fit=crop"  # 맛집/음식
+IMG_CAREER = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop"  # 취업/정책
+IMG_WEATHER = "https://images.unsplash.com/photo-1592210454359-9043f067919b?q=80&w=600&auto=format&fit=crop"  # 날씨
+IMG_BUS_190_FALLBACK = "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop"  # 190 버스
+IMG_SHUTTLE_FALLBACK = "https://images.unsplash.com/photo-1570125909517-53cb21c89ff2?q=80&w=600&auto=format&fit=crop"  # 셔틀
 
 def _img_url_or(fallback: str, *candidates: str) -> str:
     """
