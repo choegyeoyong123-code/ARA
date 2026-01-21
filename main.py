@@ -46,6 +46,10 @@ init_db()
 
 _KST = ZoneInfo("Asia/Seoul")
 
+# Ocean-themed Visual Assets (ARA Identity)
+IMG_KMOU_HOME = "https://images.unsplash.com/photo-1533596572767-021096785655?q=80&w=600&auto=format&fit=crop"  # 윤슬
+IMG_DEFAULT_WAVE = "https://images.unsplash.com/photo-1505228395891-9a51e7e86bf6?q=80&w=600&auto=format&fit=crop"  # 파도
+
 # Function-Specific Thumbnail Mapping (Visual Differentiation)
 _THUMBNAIL_MAP = {
     "Bus_190": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop",
@@ -54,11 +58,11 @@ _THUMBNAIL_MAP = {
     "Food_Restaurant": "https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=600&auto=format&fit=crop",
     "Career_Policy": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop",
     "Weather": "https://images.unsplash.com/photo-1592210454359-9043f067919b?q=80&w=600&auto=format&fit=crop",
-    "Default": "https://images.unsplash.com/photo-1516116216624-53e697fedbea?q=80&w=600&auto=format&fit=crop"
+    "Default": IMG_DEFAULT_WAVE,
 }
 
 # KakaoTalk BasicCard 규격 준수(Error 2461 방지): thumbnail 기본값(요구사항 고정 URL)
-_DEFAULT_BASICCARD_THUMBNAIL_URL = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40"
+_DEFAULT_BASICCARD_THUMBNAIL_URL = IMG_DEFAULT_WAVE
 
 _KMOU_SPECIALIZED_DICTIONARY: dict[str, list[str]] = {
     "학식": ["학식", "식단", "밥", "오늘의학식", "점심", "저녁", "식표", "학석"],
@@ -1315,6 +1319,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             title="한국해양대학교(KMOU) 홈페이지",
             description="필요한 걸 바로 찾을 수 있게 메뉴를 싹 정리해봤어. 확인해봐!\n\n공식 홈페이지에서 공지/학사일정/학과 정보를 확인할 수 있습니다.",
             buttons=[{"action": "webLink", "label": "KMOU 홈페이지 열기", "webLinkUrl": "https://www.kmou.ac.kr"}],
+            thumbnail={"imageUrl": IMG_KMOU_HOME},
         )
 
     # 셔틀 시간
