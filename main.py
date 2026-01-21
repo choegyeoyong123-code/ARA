@@ -45,6 +45,15 @@ init_db()
 _REQUEST_LANG: contextvars.ContextVar[str] = contextvars.ContextVar("session_lang", default="ko")
 _KST = ZoneInfo("Asia/Seoul")
 
+# Function-Specific Thumbnail Mapping (Visual Differentiation)
+_THUMBNAIL_MAP = {
+    "Bus_190": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop",
+    "Cafeteria": "https://images.unsplash.com/photo-1547573854-74d2a71d0826?q=80&w=600&auto=format&fit=crop",
+    "Career_Policy": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop",
+    "Weather": "https://images.unsplash.com/photo-1592210454359-9043f067919b?q=80&w=600&auto=format&fit=crop",
+    "Default": "https://images.unsplash.com/photo-1516116216624-53e697fedbea?q=80&w=600&auto=format&fit=crop"
+}
+
 _KMOU_SPECIALIZED_DICTIONARY: dict[str, list[str]] = {
     "학식": ["학식", "식단", "밥", "오늘의학식", "점심", "저녁", "식표", "학석"],
     "날씨": ["날씨", "기온", "비", "영도날씨", "온도", "체감", "날시", "날씨는"],
@@ -453,15 +462,20 @@ def _kakao_basic_card(
     buttons: list[dict] | None = None,
     thumbnail: dict | None = None,
     quick_replies: list[dict] | None = None,
+    thumbnail_type: str = "Default",
 ):
     # Mandatory thumbnail to prevent Kakao Error 2461
-    default_thumbnail = {
-        "imageUrl": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop"
-    }
+    # Use function-specific thumbnail if provided, else use type-based mapping
+    if thumbnail:
+        thumb_dict = thumbnail
+    else:
+        thumb_url = _THUMBNAIL_MAP.get(thumbnail_type, _THUMBNAIL_MAP["Default"])
+        thumb_dict = {"imageUrl": thumb_url}
+    
     card: dict = {
         "title": title,
         "description": description,
-        "thumbnail": thumbnail or default_thumbnail
+        "thumbnail": thumb_dict
     }
     if buttons:
         card["buttons"] = buttons
@@ -1059,6 +1073,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             buttons=[
                 {"action": "webLink", "label": "학식 보러가기", "webLinkUrl": "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"},
             ],
+            thumbnail_type="Cafeteria",
         )
 
     # Weather
@@ -1094,6 +1109,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 {"action": "webLink", "label": "기상청", "webLinkUrl": "https://www.weather.go.kr"},
                 {"action": "message", "label": "다시 조회", "messageText": msg},
             ],
+            thumbnail_type="Weather",
         )
 
     # Career/Jobs - English inputs normalized earlier
@@ -1106,6 +1122,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 title="커리어 가속",
                 description=_normalize_desc("워워, 천천히 물어봐도 다 답해줄 수 있어! 조금만 숨 돌리고 오자."),
                 buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
+                thumbnail_type="Career_Policy",
             )
 
         # Map English keywords to Korean for API search (English inputs normalized earlier)
@@ -1129,16 +1146,29 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                         {"action": "message", "label": "사무/세무", "messageText": "세무 채용"},
                         {"action": "message", "label": "청년정책", "messageText": "청년지원 정책"},
                     ],
+                    thumbnail_type="Career_Policy",
                 )
             keyword = (kw or "").strip() or _extract_worknet_keyword(msg)
             if any(k in msg for k in ["세무", "회계", "법", "변호", "노무", "행정", "인사", "총무", "마케팅", "경영"]):
                 keyword = " ".join([x for x in ["세무" if "세무" in msg else "", "회계" if "회계" in msg else "", "법" if "법" in msg else ""] if x]).strip() or keyword
             search_keyword = keyword or "취업"  # Default fallback
 
-        from tools import get_youth_center_info
+        from tools import get_youth_jobs
 
-        # Always search with Korean keyword (API requires Korean)
-        raw = await get_youth_center_info(query=search_keyword, limit=10, lang="ko")
+        # Determine category code from keyword
+        category_code = None
+        if any(k in msg for k in ["주거", "주택", "집"]):
+            category_code = "023020"  # Housing
+        elif any(k in msg for k in ["금융", "대출", "생활"]):
+            category_code = "023030"  # Finance_Life
+        elif any(k in msg for k in ["교육", "학습"]):
+            category_code = "023040"  # Education
+        elif any(k in msg for k in ["참여", "권리"]):
+            category_code = "023050"  # Participation_Rights
+        # Default: 023010 (Employment) - will be used if category_code is None
+
+        # Always search with Korean keyword (API requires Korean) - use get_youth_jobs with category code
+        raw = await get_youth_jobs(keyword=search_keyword, category_code=category_code)
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         if not isinstance(payload, dict):
             payload = {}
@@ -1147,12 +1177,14 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 title="커리어 가속",
                 description=_normalize_desc(payload.get("msg") or "현재 정보를 불러올 수 없습니다."),
                 buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
+                thumbnail_type="Career_Policy",
             )
         if payload.get("status") == "empty":
             return _kakao_basic_card(
                 title="커리어 가속",
                 description=_normalize_desc(payload.get("msg") or "현재 조건에 맞는 프로그램이 없습니다."),
                 buttons=[{"action": "message", "label": "다른 키워드", "messageText": "해운 채용"}],
+                thumbnail_type="Career_Policy",
             )
 
         policies = (payload.get("policies") or [])[:10]
@@ -1179,8 +1211,12 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             prd = (j.get("bizPrdCn") or j.get("period") or "").strip()
             link = (j.get("detail_url") or j.get("url") or "").strip() or "https://www.youthcenter.go.kr"
             
-            # Get thumbnail URL - ensure it's never empty
-            DEFAULT_THUMB = "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop"
+            # Get category name and support summary from policy data
+            category_name = j.get("category_name", "청년정책")
+            support_summary = j.get("support_summary") or itcn or "정보를 확인 중입니다"
+            
+            # Get thumbnail URL - ensure it's never empty (use Career_Policy thumbnail)
+            DEFAULT_THUMB = _THUMBNAIL_MAP.get("Career_Policy", _THUMBNAIL_MAP["Default"])
             thumb_from_policy = j.get("thumbnail")
             if isinstance(thumb_from_policy, dict):
                 thumbnail_url = thumb_from_policy.get("imageUrl") or DEFAULT_THUMB
@@ -1189,8 +1225,17 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             else:
                 thumbnail_url = DEFAULT_THUMB
             
-            # Korean description format
-            desc = "\n".join([x for x in [_short40(itcn), prd] if x]).strip() or "정보를 확인 중입니다"
+            # Korean description format with category and support info
+            desc_parts = []
+            if category_name:
+                desc_parts.append(f"📍 분야: {category_name}")
+            if support_summary:
+                desc_parts.append(f"💰 지원내용: {_short40(support_summary)}")
+            if prd:
+                desc_parts.append(prd)
+            
+            desc = "\n".join(desc_parts) if desc_parts else "정보를 확인 중입니다"
+            
             if not cards:
                 if is_static_fallback and fallback_msg:
                     desc = f"{fallback_msg}\n\n" + desc
@@ -1210,6 +1255,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 title="커리어 가속",
                 description=_normalize_desc("정보를 확인 중입니다"),
                 buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
+                thumbnail_type="Career_Policy",
             )
         return _kakao_carousel_basic_cards(cards)
 

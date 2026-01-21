@@ -2269,11 +2269,17 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
     _yc_cache_set(cache_key, payload)
     return json.dumps(payload, ensure_ascii=False)
 
-async def get_youth_jobs(keyword: Optional[str] = None) -> str:
+async def get_youth_jobs(keyword: Optional[str] = None, category_code: Optional[str] = None) -> str:
     """
-    Stable & Error-Free Employment Data Fetching from Youth Center API.
+    High-Precision Policy Fetching with Category Code Support (CSV-based).
     - Philosophy: Stability First. Fail gracefully with helpful fallback.
     - API: https://www.youthcenter.go.kr/opi/youthPolicyList.do
+    - Category Codes (polyBizTycd):
+      - 023010: Employment (취업)
+      - 023020: Housing (주거)
+      - 023030: Finance_Life (금융/생활)
+      - 023040: Education (교육)
+      - 023050: Participation_Rights (참여/권리)
     - Always returns valid JSON compatible with KakaoTalk API.
     """
     import xmltodict
@@ -2283,6 +2289,15 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
     api_key = "ba0aad9d-c862-410c-90ac-130b556e370e"
     default_thumbnail = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop"
     timeout_seconds = 3.0  # 3.0 seconds (Kakao limit is 5s, leave buffer)
+    
+    # Category Code Mapping (CSV-based)
+    CATEGORY_CODE_MAP = {
+        "Employment": "023010",
+        "Housing": "023020",
+        "Finance_Life": "023030",
+        "Education": "023040",
+        "Participation_Rights": "023050"
+    }
     
     # KMOU Recommended Career List (Static Fallback)
     static_policies = [
@@ -2313,21 +2328,39 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
     q = (keyword or "").strip()
     if not q or len(q) < 2:
         q = "취업"
+    
+    # Determine category code based on keyword or explicit parameter
+    poly_biz_tycd = "023010"  # Default: Employment
+    if category_code:
+        poly_biz_tycd = category_code
+    else:
+        # Auto-detect category from keyword
+        q_lower = q.lower()
+        if any(k in q for k in ["주거", "주택", "집", "housing"]):
+            poly_biz_tycd = "023020"
+        elif any(k in q for k in ["금융", "대출", "생활", "money", "finance"]):
+            poly_biz_tycd = "023030"
+        elif any(k in q for k in ["교육", "학습", "education"]):
+            poly_biz_tycd = "023040"
+        elif any(k in q for k in ["참여", "권리", "participation"]):
+            poly_biz_tycd = "023050"
+        # Default stays 023010 (Employment)
 
-    # Step 1: Check global cache first (3600 seconds TTL)
-    cache_key = f"YOUTH_JOBS:{q}"
+    # Step 1: Check global cache first (3600 seconds TTL) - include category code in cache key
+    cache_key = f"YOUTH_JOBS:{q}:{poly_biz_tycd}"
     cached_result = _yc_cache_get(cache_key)
     if cached_result is not None:
-        print(f"[ARA Debug] Youth Jobs Cache HIT for keyword: {q}")
+        print(f"[ARA Debug] Youth Jobs Cache HIT for keyword: {q}, category: {poly_biz_tycd}")
         return json.dumps(cached_result, ensure_ascii=False)
 
     try:
-        # Prepare request parameters
+        # Prepare request parameters with category code
         params = {
             "openApiVlak": api_key,
             "display": "5",
             "pageIndex": "1",
-            "query": q
+            "query": q,
+            "polyBizTycd": poly_biz_tycd  # High-precision category filtering
         }
 
         # Make API request with strict timeout
@@ -2418,9 +2451,9 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
             # Log raw response for debugging (status 200 but empty data)
             print(f"[ARA Log] Youth Jobs API: Status 200 but no youthPolicyList found. Response preview: {xml_text[:200]}")
             
-            # Try fallback search with '청년'
+            # Try fallback search with '청년' (keep same category code)
             if q != "청년":
-                return await get_youth_jobs("청년")
+                return await get_youth_jobs("청년", category_code=poly_biz_tycd)
             
             return json.dumps({
                 "status": "empty",
@@ -2443,8 +2476,8 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
             print(f"[ARA Debug] Total count is 0 for keyword: {q}")
             fallback_keywords = ["청년", "취업"] if q not in ["청년", "취업"] else ["청년"] if q == "취업" else []
             for fallback_q in fallback_keywords:
-                print(f"[ARA Debug] Trying fallback search with keyword: {fallback_q}")
-                return await get_youth_jobs(fallback_q)
+                print(f"[ARA Debug] Trying fallback search with keyword: {fallback_q}, category: {poly_biz_tycd}")
+                return await get_youth_jobs(fallback_q, category_code=poly_biz_tycd)
 
         # Extract youthPolicy - handle both single dict and list
         youth_policies = []
@@ -2485,6 +2518,16 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
                 policy.get("bizid") or 
                 ""
             ).strip()
+            
+            # Extract category name from code
+            category_name_map = {
+                "023010": "취업",
+                "023020": "주거",
+                "023030": "금융/생활",
+                "023040": "교육",
+                "023050": "참여/권리"
+            }
+            category_name = category_name_map.get(poly_biz_tycd, "청년정책")
 
             # Truncate intro to 40 chars for description
             intro_short = intro[:40] if len(intro) > 40 else intro
@@ -2498,7 +2541,9 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
                     "polyItcnCn": intro_short,
                     "bizId": biz_id,
                     "detail_url": detail_url,
-                    "thumbnail": default_thumbnail
+                    "thumbnail": default_thumbnail,
+                    "category_name": category_name,
+                    "support_summary": intro_short
                 })
 
         if not items:
