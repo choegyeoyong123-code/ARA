@@ -497,34 +497,6 @@ def get_faq_autogen(limit: int = 10) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-def get_user_lang(user_id: str) -> Optional[str]:
-    if not user_id:
-        return None
-    conn = sqlite3.connect("history.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT session_lang FROM user_settings WHERE user_id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return None
-    lang = (row[0] or "").strip().lower()
-    return lang if lang in {"ko", "en"} else None
-
-def set_user_lang(user_id: str, session_lang: str) -> None:
-    if not user_id:
-        return
-    lang = (session_lang or "").strip().lower()
-    if lang not in {"ko", "en"}:
-        return
-    conn = sqlite3.connect("history.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT OR REPLACE INTO user_settings (user_id, session_lang, updated_at) VALUES (?, ?, datetime('now'))",
-        (user_id, lang),
-    )
-    conn.commit()
-    conn.close()
-
 def get_pending_state(user_id: str) -> Optional[str]:
     if not user_id:
         return None

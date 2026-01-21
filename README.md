@@ -56,26 +56,6 @@ ARA는 추측하지 않습니다. 부산시와 기상청의 실시간 데이터�
 - `190 OUT 버스 도착 정보 알려줘`
 - `101 IN 버스 언제 와?`
 
-## 🚀 Deployment (배포)
-
-### Render.com 배포 시
-
-**Start Command**를 다음으로 설정하여 다중 워커로 동시 사용자 처리 성능을 향상시킵니다:
-
-```bash
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app
-```
-
-- `-w 4`: 4개의 워커 프로세스 생성 (동시 요청 처리)
-- `-k uvicorn.workers.UvicornWorker`: Uvicorn 워커 사용 (비동기 지원)
-- `main:app`: FastAPI 애플리케이션 진입점
-
-### 성능 최적화
-
-- 모든 외부 API 호출은 `httpx.AsyncClient`를 사용하여 비동기 처리됩니다.
-- 캐시는 전역 딕셔너리로 관리되며, `asyncio.Lock`으로 동시 접근을 안전하게 처리합니다.
-- API 타임아웃은 3.0초로 고정되어 KakaoTalk의 5초 제한을 준수합니다.
-
 ## 📚 Docs Indexing (RAG 성능 최적화)
 
 Cursor의 Docs/Indexing 기능에 아래 공식 문서를 추가하여, 스킬 서버(JSON) 규격 및 API 사용 지침을 빠르게 참조할 수 있도록 합니다.

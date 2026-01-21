@@ -6,10 +6,12 @@ load_dotenv()
 
 import asyncio
 import contextvars
+import httpx
 import tempfile
 from datetime import datetime
 from collections import deque
 from zoneinfo import ZoneInfo
+import xmltodict
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -42,7 +44,6 @@ app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 init_db()
 
-_REQUEST_LANG: contextvars.ContextVar[str] = contextvars.ContextVar("session_lang", default="ko")
 _KST = ZoneInfo("Asia/Seoul")
 
 # Function-Specific Thumbnail Mapping (Visual Differentiation)
@@ -55,6 +56,9 @@ _THUMBNAIL_MAP = {
     "Weather": "https://images.unsplash.com/photo-1592210454359-9043f067919b?q=80&w=600&auto=format&fit=crop",
     "Default": "https://images.unsplash.com/photo-1516116216624-53e697fedbea?q=80&w=600&auto=format&fit=crop"
 }
+
+# KakaoTalk BasicCard 규격 준수(Error 2461 방지): thumbnail 기본값(요구사항 고정 URL)
+_DEFAULT_BASICCARD_THUMBNAIL_URL = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40"
 
 _KMOU_SPECIALIZED_DICTIONARY: dict[str, list[str]] = {
     "학식": ["학식", "식단", "밥", "오늘의학식", "점심", "저녁", "식표", "학석"],
@@ -137,74 +141,6 @@ def _kmou_dict_best_intent(user_msg: str) -> tuple[str | None, int]:
     return (best_key, best_score)
 
 _HANGUL_RE = re.compile(r"[ㄱ-ㅎ가-힣]")
-_DIGITS_ONLY_RE = re.compile(r"^\d+$")
-_LATIN_ALNUM_RE = re.compile(r"^[A-Za-z0-9\s\.\,\!\?\-\_\/]+$")
-_LANG_TAG_RE = re.compile(r"^\[LANG:(EN|KO)\]\s*$", flags=re.IGNORECASE)
-
-def _detect_session_lang(text: str) -> str:
-    """
-    Ultra-fast Regex 언어 감지(초저지연, O(1))
-    - 입력에 한글([ㄱ-ㅎ가-힣])이 1개라도 있으면 ko
-    - 한글이 없고 영문/숫자 기반이면 en
-    - 예외: 입력이 숫자만이면 ko (예: "190")
-    """
-    s = ((text or "")[:50]).strip()
-    if not s:
-        return "ko"
-    if _HANGUL_RE.search(s):
-        return "ko"
-    if _DIGITS_ONLY_RE.fullmatch(s):
-        return "ko"
-    # "purely alphanumeric/Latin" (한글 없음)
-    if _LATIN_ALNUM_RE.fullmatch(s) and re.search(r"[A-Za-z]", s):
-        return "en"
-    return "ko"
-
-def _lang_to_tag(lang: str) -> str:
-    return "[LANG:EN]" if (lang or "").lower() == "en" else "[LANG:KO]"
-
-def _lang_from_tag(tag: str | None) -> str | None:
-    if not tag:
-        return None
-    m = _LANG_TAG_RE.match(tag.strip())
-    if not m:
-        return None
-    return "en" if m.group(1).upper() == "EN" else "ko"
-
-def _extract_lang_from_history(history: list) -> str | None:
-    """
-    O(1) time: 태그는 항상 history[0]에 두되, 안전하게 앞 5개만 확인합니다.
-    """
-    if not history:
-        return None
-    for it in history[:5]:
-        if isinstance(it, dict) and it.get("role") == "system":
-            lang = _lang_from_tag(it.get("content"))
-            if lang:
-                return lang
-    return None
-
-def _upsert_lang_tag_in_history(user_id: str | None, lang: str) -> None:
-    if not user_id:
-        return
-    try:
-        hist = get_history(user_id) or []
-    except Exception:
-        hist = []
-    # 성능 가드: history는 agent.py에서 최대 25개로 유지하지만, 혹시 모를 과거 데이터에 대비해 상한을 둡니다.
-    if isinstance(hist, list) and len(hist) > 30:
-        hist = hist[-30:]
-    # remove existing lang tags (first few만)
-    new_hist: list = []
-    for it in hist:
-        if isinstance(it, dict) and it.get("role") == "system" and _lang_from_tag(it.get("content")):
-            continue
-        new_hist.append(it)
-    new_hist.insert(0, {"role": "system", "content": _lang_to_tag(lang)})
-    try:
-        save_history(user_id, new_hist)
-    except Exception:
-        pass
 
 def _t(key: str) -> str:
     """Korean-only translation table"""
@@ -438,10 +374,32 @@ def _kakao_response(outputs: list[dict], quick_replies: list[dict] | None = None
     - 반드시 {"version":"2.0","template":{"outputs":[...]}} 형식을 유지
     - 모든 응답에 quickReplies 상시 포함
     """
+    # KakaoTalk 규격: 모든 basicCard에 thumbnail 필수
+    def _ensure_basiccard_thumbnail(card: dict) -> None:
+        if not isinstance(card, dict):
+            return
+        thumb = card.get("thumbnail")
+        if not isinstance(thumb, dict) or not str(thumb.get("imageUrl") or "").strip():
+            card["thumbnail"] = {"imageUrl": _DEFAULT_BASICCARD_THUMBNAIL_URL}
+
+    safe_outputs = outputs or []
+    for out in safe_outputs:
+        if not isinstance(out, dict):
+            continue
+        bc = out.get("basicCard")
+        if isinstance(bc, dict):
+            _ensure_basiccard_thumbnail(bc)
+        car = out.get("carousel")
+        if isinstance(car, dict) and car.get("type") == "basicCard":
+            items = car.get("items")
+            if isinstance(items, list):
+                for it in items:
+                    if isinstance(it, dict):
+                        _ensure_basiccard_thumbnail(it)
     return {
         "version": "2.0",
         "template": {
-            "outputs": outputs,
+            "outputs": safe_outputs,
             "quickReplies": (quick_replies if isinstance(quick_replies, list) else _build_quick_replies()),
         },
     }
@@ -626,7 +584,6 @@ def _is_nav_intent(msg: str) -> bool:
         "맛집", "식당", "food", "restaurant",
         "학식", "식단", "cafeteria",
         "맛집 제보", "제보하기",
-        "__toggle_lang__",
     ]
     return any(k in t for k in nav_keywords)
 
@@ -1441,18 +1398,8 @@ async def chat_endpoint(request: Request):
             "weekday": now_kst.weekday(),
             "tz": "Asia/Seoul",
         }
-        # 웹챗: history 태그([LANG:..]) 기반으로 세션 언어 고정
-        hist = []
-        if user_id:
-            try:
-                hist = get_history(user_id) or []
-            except Exception:
-                hist = []
-        stored_lang = _extract_lang_from_history(hist)
-        session_lang = stored_lang or _detect_session_lang((user_msg or "")[:50])
-        if user_id and not stored_lang:
-            _upsert_lang_tag_in_history(user_id, session_lang)
-        res = await ask_ara(user_msg, user_id=user_id, return_meta=True, session_lang=session_lang, current_context=current_context)
+        # 요구사항: lang 관련 로직 제거(항상 한국어)
+        res = await ask_ara(user_msg, user_id=user_id, return_meta=True, session_lang="ko", current_context=current_context)
         yield f"data: {json.dumps(res, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -1511,16 +1458,7 @@ async def kakao_endpoint(request: Request):
             "current_time_str": now_kst.strftime("%H:%M"),
         }
 
-        # -------- 언어 세션 고정(Stateless Kakao 대응): history 태그 기반 --------
-        raw_first = (user_msg or "")[:50]
-        hist = []
-        if kakao_user_id:
-            try:
-                hist = get_history(kakao_user_id) or []
-            except Exception:
-                hist = []
-        stored_lang = _extract_lang_from_history(hist)
-        detected = _detect_session_lang(raw_first)
+        # -------- 요구사항: lang 관련 로직 제거(항상 한국어) --------
         msg_norm = (user_msg or "").strip()
 
         # English input normalization (convert to Korean intent)
@@ -1531,9 +1469,6 @@ async def kakao_endpoint(request: Request):
         
         # Always use Korean language
         session_lang = "ko"
-        if kakao_user_id:
-            _upsert_lang_tag_in_history(kakao_user_id, session_lang)
-        _REQUEST_LANG.set(session_lang)
         
         if not user_msg:
             return _kakao_basic_card(
@@ -1587,7 +1522,7 @@ async def kakao_endpoint(request: Request):
             return structured
 
         st2, res = await _run_with_timeout(
-            ask_ara(user_msg, user_id=kakao_user_id, return_meta=True, session_lang=_REQUEST_LANG.get(), current_context=current_context),
+            ask_ara(user_msg, user_id=kakao_user_id, return_meta=True, session_lang=session_lang, current_context=current_context),
             timeout=kakao_timeout,
         )
         if st2 == "timeout":
