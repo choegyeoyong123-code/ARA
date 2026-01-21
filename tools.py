@@ -1040,6 +1040,91 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: s
         ensure_ascii=False,
     )
 
+_BUS_190_KMOU_MAIN_TIMETABLE: Dict[str, List[str]] = {
+    "Mon": ["04:55", "05:10", "05:25", "05:40", "05:55", "06:11", "06:25", "06:40", "06:55", "07:10", "07:27", "07:45", "08:04", "08:22", "08:41", "09:01", "09:20", "09:40", "09:59", "10:20", "10:40", "11:00", "11:20", "11:43", "12:02", "12:21", "12:40", "12:59", "13:18", "13:37", "13:56", "14:15", "14:34", "14:54", "15:12", "15:29", "15:47", "16:07", "16:26", "16:45", "17:04", "17:23", "17:42", "18:01", "18:19", "18:39", "18:57", "19:18", "19:37", "19:56", "20:14", "20:34", "20:53", "21:12", "21:30", "21:49"],
+    "Tue": ["04:55", "05:10", "05:25", "05:40", "05:55", "06:10", "06:25", "06:40", "06:55", "07:10", "07:27", "07:45", "08:04", "08:23", "08:43", "09:00", "09:19", "09:39", "10:00", "10:20", "10:39", "11:00", "11:20", "11:43", "12:02", "12:21", "12:40", "12:59", "13:18", "13:37", "13:56", "14:15", "14:34", "14:53", "15:13", "15:28", "15:48", "16:07", "16:26", "16:45", "17:04", "17:23", "17:42", "18:01", "18:20", "18:39", "18:58", "19:17", "19:37", "19:56", "20:15", "20:34", "20:53", "21:11", "21:30", "21:49"],
+    "Wed": ["04:55", "05:10", "05:25", "05:40", "05:55", "06:10", "06:25", "06:40", "06:55", "07:10", "07:27", "07:45", "08:04", "08:23", "08:42", "09:01", "09:20", "09:40", "10:00", "10:20", "10:40", "10:59", "11:19", "11:43", "12:02", "12:21", "12:40", "12:59", "13:18", "13:37", "13:56", "14:15", "14:34", "14:53", "15:12", "15:28", "15:48", "16:07", "16:26", "16:45", "17:04", "17:23", "17:42", "18:01", "18:20", "18:39", "18:58", "19:18", "19:36", "19:56", "20:15", "20:34", "20:52", "21:12", "21:31", "21:49"],
+    "Thu": ["04:55", "05:10", "05:25", "05:40", "05:55", "06:10", "06:25", "06:40", "06:55", "07:10", "07:28", "07:45", "08:04", "08:22", "08:42", "09:01", "09:20", "09:39", "10:00", "10:20", "10:40", "11:00", "11:19", "11:43", "12:03", "12:21", "12:40", "12:59", "13:18", "13:37", "13:56", "14:16", "14:34", "14:53", "15:13", "15:29", "15:48", "16:07", "16:25", "16:45", "17:04", "17:23", "17:42", "18:01", "18:20", "18:39", "18:58", "19:18", "19:37", "19:56", "20:15", "20:34", "20:53", "21:11", "21:30", "21:49"],
+    "Fri": ["04:55", "05:10", "05:25", "05:40", "05:55", "06:10", "06:25", "06:40", "06:55", "07:10", "07:27", "07:45", "08:03", "08:22", "08:41", "09:00", "09:20", "09:39", "10:00", "10:20", "10:40", "11:00", "11:20", "11:43", "12:02", "12:21", "12:40", "12:59", "13:18", "13:38", "13:56", "14:15", "14:34", "14:53", "15:12", "15:28", "15:48", "16:07", "16:26", "16:45", "17:04", "17:23", "17:42", "18:01", "18:20", "18:39", "18:57", "19:18", "19:36", "19:55", "20:14", "20:34", "20:53", "21:12", "21:30", "21:50"],
+    "Sat": ["04:55", "05:12", "05:29", "05:46", "06:03", "06:20", "06:39", "06:55", "07:12", "07:30", "07:46", "08:04", "08:24", "08:47", "09:09", "09:31", "09:53", "10:14", "10:36", "10:59", "11:21", "11:43", "12:05", "12:26", "12:49", "13:11", "13:33", "13:55", "14:17", "14:38", "14:59", "15:16", "15:32", "15:52", "16:12", "16:34", "16:57", "17:18", "17:40", "18:02", "18:23", "18:44", "19:07", "19:26", "19:46", "20:07", "20:26", "20:47", "21:07", "21:28", "21:49"],
+    "Holiday": ["04:55", "05:14", "05:33", "05:52", "06:12", "06:32", "06:50", "07:10", "07:29", "07:48", "08:07", "08:33", "08:58", "09:24", "09:49", "10:15", "10:38", "11:00", "11:21", "11:41", "12:06", "12:31", "12:56", "13:22", "13:47", "14:13", "14:36", "14:58", "15:19", "15:39", "16:04", "16:29", "16:54", "17:20", "17:45", "18:11", "18:34", "18:56", "19:16", "19:37", "19:56", "20:17", "20:40", "21:02", "21:25", "21:49"],
+}
+
+async def get_bus_190_kmou_main_next_departures(now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None) -> str:
+    now_dt = _reference_datetime()
+    if date_yyyymmdd:
+        digits = re.sub(r"\D+", "", str(date_yyyymmdd))
+        if len(digits) == 8:
+            try:
+                now_dt = datetime(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]), now_dt.hour, now_dt.minute, tzinfo=_KST)
+            except Exception:
+                pass
+    if now_hhmm:
+        mm = _hhmm_to_minutes(now_hhmm)
+        if mm is not None:
+            now_dt = now_dt.replace(hour=mm // 60, minute=mm % 60, second=0, microsecond=0)
+
+    ymd = now_dt.strftime("%Y%m%d")
+    wd = now_dt.weekday()
+    is_hol = is_holiday_2026(ymd)
+    if is_hol is True or wd == 6:
+        day_key = "Holiday"
+    elif wd == 5:
+        day_key = "Sat"
+    else:
+        day_key = ["Mon", "Tue", "Wed", "Thu", "Fri"][wd]
+
+    times = _BUS_190_KMOU_MAIN_TIMETABLE.get(day_key) or []
+    cur_m = now_dt.hour * 60 + now_dt.minute
+    minutes = []
+    for t in times:
+        m = _hhmm_to_minutes(t)
+        if m is not None:
+            minutes.append((m, t))
+    minutes.sort(key=lambda x: x[0])
+
+    next1 = next(((m, t) for (m, t) in minutes if m >= cur_m), None)
+    if not next1:
+        last = minutes[-1][1] if minutes else None
+        return json.dumps(
+            {
+                "status": "ENDED",
+                "stop_name": "해양대구본관",
+                "route_number": "190",
+                "day_type": day_key,
+                "now": now_dt.strftime("%H:%M"),
+                "next": None,
+                "next2": None,
+                "remaining_min": None,
+                "last_time": last,
+            },
+            ensure_ascii=False,
+        )
+
+    rem1 = int(next1[0] - cur_m)
+    idx = 0
+    for i, (m, t) in enumerate(minutes):
+        if t == next1[1] and m == next1[0]:
+            idx = i
+            break
+    next2 = minutes[idx + 1] if idx + 1 < len(minutes) else None
+    rem2 = int(next2[0] - cur_m) if next2 else None
+
+    status = "PRE_DEPARTURE" if rem1 > 0 else "ACTIVE"
+    return json.dumps(
+        {
+            "status": status,
+            "stop_name": "해양대구본관",
+            "route_number": "190",
+            "day_type": day_key,
+            "now": now_dt.strftime("%H:%M"),
+            "next": {"time": next1[1], "remaining_min": rem1},
+            "next2": ({"time": next2[1], "remaining_min": rem2} if next2 else None),
+            "remaining_min": rem1,
+        },
+        ensure_ascii=False,
+    )
+
 # =========================
 # 2-1) 190 버스 트래커 (ARA_190_Bus_Tracker)
 # - getBusLocation() 응답(= items 배열)을 검증하여 실시간 위치를 제공
@@ -1937,6 +2022,169 @@ async def get_worknet_maritime_logistics_jobs(query: Optional[str] = None, limit
         )
 
     return json.dumps({"status": "success", "query": q, "jobs": out}, ensure_ascii=False)
+
+_YOUTH_CENTER_JOB_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_YOUTH_CENTER_JOB_CACHE_TTL_SECONDS = int(os.environ.get("ARA_YOUTH_CENTER_CACHE_TTL_SECONDS", "86400"))
+
+def _yc_cache_get(key: str) -> Optional[Dict[str, Any]]:
+    item = _YOUTH_CENTER_JOB_CACHE.get(key)
+    if not item:
+        return None
+    ts, val = item
+    if time.time() - ts > float(_YOUTH_CENTER_JOB_CACHE_TTL_SECONDS or 0):
+        _YOUTH_CENTER_JOB_CACHE.pop(key, None)
+        return None
+    return val
+
+def _yc_cache_set(key: str, value: Dict[str, Any]) -> None:
+    _YOUTH_CENTER_JOB_CACHE[key] = (time.time(), value)
+
+async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") -> str:
+    """
+    온통청년/Work24(Youth Center) API: searchJob.do
+    - 응답(XML) → dict(JSON) 변환 후, 필요한 필드만 추출
+    - 캐시: 24h(in-memory)
+    """
+    import requests
+    import xmltodict
+
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+
+    api_key = (os.environ.get("YOUTH_CENTER_API_KEY") or os.environ.get("WORK24_OPENAPI_KEY") or "").strip()
+    if not api_key:
+        return json.dumps({"status": "error", "msg": ("정보를 확인 중입니다" if lang != "en" else "Data is being verified.")}, ensure_ascii=False)
+
+    q = (query or "").strip()
+    if not q:
+        q = "해운 물류"
+
+    limit_n = max(1, min(int(limit or 5), 5))
+    endpoint = "https://www.work24.go.kr/openapi/openapi/common/searchJob.do"
+    timeout_s = float(os.environ.get("ARA_YOUTH_CENTER_TIMEOUT_SECONDS", "3.5"))
+    num_rows = str(max(10, min(limit_n * 6, 60)))
+
+    cache_key = f"YOUTH24:{q}:{limit_n}"
+    cached = _yc_cache_get(cache_key)
+    if cached is not None:
+        return json.dumps(cached, ensure_ascii=False)
+
+    def _fetch_xml(params: Dict[str, Any]) -> str:
+        r = requests.get(endpoint, params=params, headers=HEADERS, timeout=timeout_s, verify=HTTPX_VERIFY)
+        r.raise_for_status()
+        return r.text or ""
+
+    params_candidates = [
+        {"apiKey": api_key, "keyword": q, "pageNo": "1", "numOfRows": num_rows},
+        {"serviceKey": api_key, "keyword": q, "pageNo": "1", "numOfRows": num_rows},
+        {"authKey": api_key, "keyword": q, "pageNo": "1", "numOfRows": num_rows},
+    ]
+
+    xml_text = ""
+    for p in params_candidates:
+        try:
+            xml_text = await asyncio.to_thread(_fetch_xml, p)
+            if xml_text:
+                break
+        except Exception:
+            continue
+
+    if not xml_text:
+        payload = {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch jobs right now.")}
+        _yc_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+
+    try:
+        parsed = xmltodict.parse(xml_text)
+    except Exception:
+        payload = {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch jobs right now.")}
+        _yc_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _iter_dicts(node: Any) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        if isinstance(node, dict):
+            out.append(node)
+            for v in node.values():
+                out.extend(_iter_dicts(v))
+        elif isinstance(node, list):
+            for it in node:
+                out.extend(_iter_dicts(it))
+        return out
+
+    def _extract_items(node: Any) -> List[Dict[str, Any]]:
+        if isinstance(node, dict):
+            for k in ["items", "itemList", "jobList", "jobs", "list"]:
+                v = node.get(k)
+                if v is None:
+                    continue
+                found = _extract_items(v)
+                if found:
+                    return found
+            if "item" in node:
+                v = node.get("item")
+                if isinstance(v, list):
+                    return [x for x in v if isinstance(x, dict)]
+                if isinstance(v, dict):
+                    return [v]
+            return []
+        if isinstance(node, list):
+            out: List[Dict[str, Any]] = []
+            for it in node:
+                out.extend(_extract_items(it))
+            return out
+        return []
+
+    items = _extract_items(parsed) or []
+    if not items:
+        payload = {"status": "empty", "msg": ("현재 진행 중인 채용 정보가 없습니다." if lang != "en" else "No jobs found."), "query": q, "jobs": []}
+        _yc_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _pick(it: Dict[str, Any], keys: List[str]) -> str:
+        for k in keys:
+            v = it.get(k)
+            if v is None:
+                continue
+            if isinstance(v, (str, int, float)):
+                s = str(v).strip()
+                if s:
+                    return s
+        return ""
+
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        title = _pick(it, ["programNm", "programName", "title", "jobTitle", "wantedTitle", "recrtTitle", "sj"])
+        summary = _pick(it, ["benefit", "benefitCn", "summary", "desc", "description", "cn", "content"])
+        deadline = _pick(it, ["deadline", "ddlnDt", "endDate", "closeDt", "receiptCloseDt", "endYmd", "end_ymd"])
+        detail = _pick(it, ["detailUrl", "detailURL", "url", "link", "detailPageUrl", "homepage", "pageUrl"])
+
+        if not title:
+            continue
+
+        if detail:
+            out.append(
+                {
+                    "title": title,
+                    "summary": summary,
+                    "deadline": deadline,
+                    "detail_url": detail,
+                }
+            )
+        if len(out) >= limit_n:
+            break
+
+    if not out:
+        payload = {"status": "empty", "msg": ("현재 진행 중인 채용 정보가 없습니다." if lang != "en" else "No jobs found."), "query": q, "jobs": []}
+        _yc_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+
+    payload = {"status": "success", "source": "youth_center_work24", "query": q, "jobs": out}
+    _yc_cache_set(cache_key, payload)
+    return json.dumps(payload, ensure_ascii=False)
 
 async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang: str = "ko", strict_yeongdo: Optional[bool] = None):
     """

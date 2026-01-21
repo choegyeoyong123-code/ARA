@@ -8,6 +8,7 @@ import asyncio
 import contextvars
 import tempfile
 from datetime import datetime
+from collections import deque
 from zoneinfo import ZoneInfo
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -15,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 import json
 import re
 import time
+from rapidfuzz import fuzz
 
 # 커스텀 모듈은 반드시 load_dotenv() 이후 import
 from database import (
@@ -42,6 +44,46 @@ init_db()
 
 _REQUEST_LANG: contextvars.ContextVar[str] = contextvars.ContextVar("session_lang", default="ko")
 _KST = ZoneInfo("Asia/Seoul")
+
+_KMOU_SPECIALIZED_DICTIONARY: dict[str, list[str]] = {
+    "학식": ["학식", "식단", "밥", "오늘의학식", "점심", "저녁", "식표", "학석"],
+    "날씨": ["날씨", "기온", "비", "영도날씨", "온도", "체감", "날시", "날씨는"],
+    "맛집": ["맛집", "식당", "카페", "영도맛집", "밥집", "맛짐", "맛짖"],
+    "제보": ["제보", "추천", "맛집제보", "등록", "제보하기", "재보", "추천하기"],
+    "취업": ["취업", "채용", "일자리", "공고", "워크넷", "취업정보", "구인", "추업"],
+    "병원": ["병원", "약국", "응급실", "아파요", "진료", "의원", "보건", "병언"],
+}
+_KMOU_DICT_FLAT: list[tuple[str, str]] = []
+
+def _norm_for_fuzz(s: str) -> str:
+    t = (s or "").strip().casefold()
+    t = re.sub(r"\s+", "", t)
+    return t
+
+def _build_kmou_dict_flat() -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for k, vals in (_KMOU_SPECIALIZED_DICTIONARY or {}).items():
+        for v in (vals or []):
+            nv = _norm_for_fuzz(v)
+            if nv:
+                out.append((k, nv))
+    return out
+
+def _kmou_dict_best_intent(user_msg: str) -> tuple[str | None, int]:
+    global _KMOU_DICT_FLAT
+    if not _KMOU_DICT_FLAT:
+        _KMOU_DICT_FLAT = _build_kmou_dict_flat()
+    u = _norm_for_fuzz(user_msg)
+    if not u:
+        return (None, 0)
+    best_key: str | None = None
+    best_score = 0
+    for k, v in _KMOU_DICT_FLAT:
+        sc = int(fuzz.ratio(u, v))
+        if sc > best_score:
+            best_score = sc
+            best_key = k
+    return (best_key, best_score)
 
 _HANGUL_RE = re.compile(r"[ㄱ-ㅎ가-힣]")
 _DIGITS_ONLY_RE = re.compile(r"^\d+$")
@@ -142,6 +184,7 @@ def _nav_quick_replies(lang: str) -> list[dict]:
     if lang == "en":
         base = [
             {"label": "🚌 190 Bus", "action": "message", "messageText": "190 bus"},
+            {"label": "🕒 190 Departs (KMOU Main)", "action": "message", "messageText": "190 해양대구본관 출발"},
             {"label": "🌤️ Weather", "action": "message", "messageText": "weather"},
             {"label": "🚐 Shuttle", "action": "message", "messageText": "shuttle"},
             {"label": "🍱 Cafeteria", "action": "message", "messageText": "cafeteria menu"},
@@ -153,6 +196,7 @@ def _nav_quick_replies(lang: str) -> list[dict]:
     else:
         base = [
             {"label": "🚌 190번 버스", "action": "message", "messageText": "190 버스"},
+            {"label": "🕒 190 출발(구본관)", "action": "message", "messageText": "190 해양대구본관 출발"},
             {"label": "🌤️ 해양대 날씨", "action": "message", "messageText": "영도 날씨"},
             {"label": "🚐 셔틀버스", "action": "message", "messageText": "셔틀 시간"},
             {"label": "🍱 학식", "action": "message", "messageText": "학식"},
@@ -200,6 +244,12 @@ async def startup_diagnostics():
     except FileExistsError:
         # already logged by another worker
         pass
+
+# dict flat precompute (latency guard)
+try:
+    _KMOU_DICT_FLAT = _build_kmou_dict_flat()
+except Exception:
+    _KMOU_DICT_FLAT = []
 
 # NOTE: quickReplies는 `_build_quick_replies()`에서 요청 언어 기반으로 동적 생성합니다.
 NAV_QUICK_REPLIES: list[dict] = []
@@ -632,6 +682,65 @@ def _extract_worknet_keyword(user_msg: str) -> str:
     # 길이 제한(워크넷 키워드 과다 방지)
     return cleaned[:50]
 
+_CAREER_INTENT_MAP: dict[str, list[str]] = {
+    "취업_해양공학": ["해운", "물류", "it", "공학", "항만", "선사", "조선", "항해", "기관", "해양", "해양공학", "해사", "운항", "기관사"],
+    "취업_전문사무": ["법", "회계", "세무", "인사", "마케팅", "경영", "행정", "사회과학", "인문", "인문학", "사회", "문과", "정책", "공공", "교육", "언론", "콘텐츠"],
+    "청년정책": ["정책", "지원금", "수당", "청년지원", "정부지원", "활동비"],
+}
+_CAREER_FLAT: list[tuple[str, str, str]] = []
+_CAREER_RATE: dict[str, deque] = {}
+
+def _build_career_flat() -> list[tuple[str, str, str]]:
+    out: list[tuple[str, str, str]] = []
+    for intent, kws in (_CAREER_INTENT_MAP or {}).items():
+        for kw in (kws or []):
+            nkw = _norm_for_fuzz(kw)
+            if nkw:
+                out.append((intent, nkw, kw))
+    return out
+
+def _career_rate_limited(user_id: str | None) -> bool:
+    key = (user_id or "__anon__").strip() if isinstance(user_id, str) else "__anon__"
+    dq = _CAREER_RATE.get(key)
+    if dq is None:
+        dq = deque()
+        _CAREER_RATE[key] = dq
+    now = time.time()
+    while dq and (now - dq[0] > 10.0):
+        dq.popleft()
+    if len(dq) >= 5:
+        return True
+    dq.append(now)
+    return False
+
+def _career_best_intent(user_msg: str) -> tuple[str | None, int, str | None]:
+    global _CAREER_FLAT
+    if not _CAREER_FLAT:
+        _CAREER_FLAT = _build_career_flat()
+    s = (user_msg or "").strip()
+    if not s:
+        return (None, 0, None)
+    tl = s.casefold()
+    tokens = re.findall(r"[0-9a-z가-힣]+", tl)
+    cands = tokens + [tl.replace(" ", "")]
+    best_intent: str | None = None
+    best_kw: str | None = None
+    best_score = 0
+    for intent, kw_norm, kw_raw in _CAREER_FLAT:
+        sc = 0
+        for c in cands:
+            cn = _norm_for_fuzz(c)
+            if not cn:
+                continue
+            sc = max(sc, int(fuzz.ratio(cn, kw_norm)))
+            if sc >= 100:
+                break
+        if sc > best_score:
+            best_score = sc
+            best_intent = intent
+            best_kw = kw_raw
+    return (best_intent, best_score, best_kw)
+
 async def _handle_structured_kakao(user_msg: str, user_id: str | None):
     """
     카카오용: 도구 결과를 구조화된 카드로 변환(정확성/형식 준수).
@@ -639,7 +748,80 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
     from tools import get_bus_arrival, search_restaurants
 
     msg = (user_msg or "").strip()
+    orig_msg = msg
     lang = _REQUEST_LANG.get()
+
+    dict_intent, dict_score = _kmou_dict_best_intent(msg)
+    if dict_intent and 65 <= dict_score <= 74:
+        label_map = {
+            "학식": "학식",
+            "날씨": "영도 날씨",
+            "맛집": "맛집",
+            "제보": "맛집 제보하기",
+            "취업": "취업",
+            "병원": "약국/병원",
+        }
+        guess = dict_intent
+        target_text = label_map.get(guess, guess)
+        return _kakao_basic_card(
+            title="ARA 확인",
+            description=_normalize_desc(f"혹시 {guess} 정보를 찾으시는 건가요?"),
+            buttons=[
+                {"action": "message", "label": (f"{guess} 보기" if lang != "en" else f"Open {guess}"), "messageText": target_text},
+                {"action": "message", "label": ("취소" if lang != "en" else "Cancel"), "messageText": ("home" if lang == "en" else "KMOU 홈페이지")},
+            ],
+        )
+
+    if dict_intent and dict_score >= 75:
+        if dict_intent == "학식":
+            msg = "학식"
+        elif dict_intent == "날씨":
+            msg = "영도 날씨"
+        elif dict_intent == "맛집":
+            if any(k in orig_msg.lower() for k in ["카페", "커피", "cafe", "coffee"]):
+                msg = "카페"
+            else:
+                msg = "맛집"
+        elif dict_intent == "제보":
+            msg = "맛집 제보하기"
+        elif dict_intent == "병원":
+            msg = "약국/병원"
+        elif dict_intent == "취업":
+            msg = orig_msg
+
+    if ("190" in msg) and (("해양대구본관" in msg) or ("구본관" in msg)) and any(k in msg for k in ["출발", "시간표", "언제", "다음", "몇분", "몇 분"]):
+        from tools import get_bus_190_kmou_main_next_departures
+
+        raw = await get_bus_190_kmou_main_next_departures()
+        payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        if not isinstance(payload, dict):
+            payload = {}
+        if payload.get("status") == "ENDED":
+            last_t = payload.get("last_time") or ""
+            desc = f"오늘은 운행이 종료되었습니다." + (f" (막차 {last_t})" if last_t else "")
+            return _kakao_basic_card(
+                title="🚌 190번 버스 출발(해양대구본관)",
+                description=_normalize_desc(desc),
+                buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
+            )
+        nxt = payload.get("next") or {}
+        nxt2 = payload.get("next2") or {}
+        day_key = (payload.get("day_type") or "").strip()
+        day_ko = {"Mon": "월요일", "Tue": "화요일", "Wed": "수요일", "Thu": "목요일", "Fri": "금요일", "Sat": "토요일", "Holiday": "공휴일"}.get(day_key, day_key or "오늘")
+        t1 = (nxt.get("time") or "").strip()
+        r1 = nxt.get("remaining_min")
+        t2 = (nxt2.get("time") or "").strip()
+        line = f"현재 요일({day_ko}) 기준 가장 빠른 버스는 {t1}"
+        if isinstance(r1, int):
+            line += f"({r1}분 남음)"
+        line += "입니다."
+        if t2:
+            line += f" 다음 버스는 {t2}에 있습니다."
+        return _kakao_basic_card(
+            title="🚌 190번 버스 출발(해양대구본관)",
+            description=_normalize_desc_preserve_lines(line),
+            buttons=[{"action": "message", "label": "다시 조회", "messageText": msg}],
+        )
 
     # 인터랙션 로그(프로토타입): 자주 묻는 질문/의도 집계를 위해 저장(응답에는 절대 노출하지 않음)
     try:
@@ -897,47 +1079,75 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             ],
         )
 
-    if any(k in msg for k in ["취업", "채용", "일자리", "워크넷", "worknet", "job", "jobs", "career"]):
-        from tools import get_worknet_maritime_logistics_jobs
+    if any(k in msg for k in ["취업", "채용", "일자리", "공고", "워크넷", "worknet", "job", "jobs", "career", "청년", "지원금", "수당"]):
+        if _career_rate_limited(user_id):
+            return _kakao_basic_card(
+                title=("Career" if lang == "en" else "커리어 가속"),
+                description=_normalize_desc("워워, 천천히 물어봐도 다 답해줄 수 있어! 조금만 숨 돌리고 오자."),
+                buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
+            )
 
-        keyword = _extract_worknet_keyword(msg)
-        raw = await get_worknet_maritime_logistics_jobs(query=keyword, limit=5, lang=lang)
+        intent, score, kw = _career_best_intent(msg)
+        if intent and 65 <= score <= 74:
+            return _kakao_basic_card(
+                title=("Career" if lang == "en" else "커리어 가속"),
+                description=_normalize_desc(f"혹시 {intent.replace('_', ' ')} 쪽을 찾으시는 건가요?"),
+                buttons=[
+                    {"action": "message", "label": ("Maritime/Engineering" if lang == "en" else "해양/공학"), "messageText": "해운 채용"},
+                    {"action": "message", "label": ("Office/Tax" if lang == "en" else "사무/세무"), "messageText": "세무 채용"},
+                    {"action": "message", "label": ("Youth Policy" if lang == "en" else "청년정책"), "messageText": "청년지원 정책"},
+                ],
+            )
+
+        keyword = (kw or "").strip() or _extract_worknet_keyword(msg)
+        if "세무" in msg or "회계" in msg:
+            keyword = "세무 회계"
+
+        from tools import get_youth_center_jobs
+
+        raw = await get_youth_center_jobs(query=keyword, limit=5, lang=lang)
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         if not isinstance(payload, dict):
             payload = {}
         if payload.get("status") == "error":
             return _kakao_basic_card(
-                title=("Jobs" if lang == "en" else "채용"),
-                description=_normalize_desc(payload.get("msg") or ("정보를 확인 중입니다" if lang != "en" else "Data is being verified.")),
-                buttons=[{"action": "message", "label": ("다시 조회" if lang != "en" else "Retry"), "messageText": msg}],
+                title=("Career" if lang == "en" else "커리어 가속"),
+                description=_normalize_desc(payload.get("msg") or ("현재 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch right now.")),
+                buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
             )
         if payload.get("status") == "empty":
             return _kakao_basic_card(
-                title=("Jobs" if lang == "en" else "채용"),
-                description=_normalize_desc(payload.get("msg") or ("현재 진행 중인 해운/물류 채용 공고가 없습니다." if lang != "en" else "No jobs found.")),
-                buttons=[
-                    {"action": "message", "label": ("다른 키워드로" if lang != "en" else "Try another keyword"), "messageText": ("물류 채용" if lang != "en" else "logistics jobs")},
-                    {"action": "message", "label": ("다시 조회" if lang != "en" else "Retry"), "messageText": msg},
-                ],
+                title=("Career" if lang == "en" else "커리어 가속"),
+                description=_normalize_desc(payload.get("msg") or ("현재 조건에 맞는 프로그램이 없습니다." if lang != "en" else "No matching programs found.")),
+                buttons=[{"action": "message", "label": ("다른 키워드" if lang != "en" else "Try another"), "messageText": "해운 채용"}],
             )
 
         jobs = (payload.get("jobs") or [])[:5]
-        items = []
+        cards = []
         for j in jobs:
             if not isinstance(j, dict):
                 continue
-            title = (j.get("title") or "채용").strip()
-            company = (j.get("company") or "").strip()
-            region = (j.get("region") or "").strip()
-            end_date = (j.get("end_date") or "").strip()
-            link = (j.get("link") or _map_search_link(title)).strip()
-            desc = " / ".join([x for x in [company, region, (f"마감 {end_date}" if end_date else "")] if x]).strip()
-            items.append({"title": title[:50], "description": _normalize_desc(desc), "link": {"web": link}})
-        return _kakao_list_card(
-            header_title=(f"Maritime/Logistics Jobs: {keyword}" if lang == "en" else f"해운/물류 채용(워크넷): {keyword}"),
-            items=items or [{"title": "채용", "description": "정보를 확인 중입니다", "link": {"web": "https://www.work.go.kr"}}],
-            buttons=[{"action": "webLink", "label": ("Open Worknet" if lang == "en" else "워크넷 열기"), "webLinkUrl": "https://www.work.go.kr"}],
-        )
+            title = (j.get("title") or "프로그램").strip()
+            summary = (j.get("summary") or "").strip()
+            deadline = (j.get("deadline") or "").strip()
+            link = (j.get("detail_url") or "").strip() or "https://www.work24.go.kr"
+            desc = "\n".join([x for x in [("혜택/요약: " + summary if summary else ""), ("마감: " + deadline if deadline else "")] if x]).strip()
+            if not desc:
+                desc = "정보를 확인 중입니다"
+            cards.append(
+                {
+                    "title": title[:50],
+                    "description": _normalize_desc_preserve_lines(desc),
+                    "buttons": [{"action": "webLink", "label": ("Details" if lang == "en" else "상세보기"), "webLinkUrl": link}],
+                }
+            )
+        if not cards:
+            return _kakao_basic_card(
+                title=("Career" if lang == "en" else "커리어 가속"),
+                description=_normalize_desc("정보를 확인 중입니다"),
+                buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
+            )
+        return _kakao_carousel_basic_cards(cards)
 
     if ("맛집" in msg) or ("식당" in msg) or ("restaurants" in msg.lower()) or ("food" in msg.lower()) or ("restaurant" in msg.lower()):
         from tools import get_random_yeongdo_restaurant
