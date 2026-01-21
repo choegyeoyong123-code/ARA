@@ -10,9 +10,11 @@ import httpx
 import tempfile
 from datetime import datetime
 from collections import deque
+from pathlib import Path
 from zoneinfo import ZoneInfo
 import xmltodict
 from fastapi import FastAPI, Request, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 import json
@@ -46,6 +48,25 @@ init_db()
 
 _KST = ZoneInfo("Asia/Seoul")
 
+# Static assets (Kakao thumbnail hosting)
+# - KakaoTalk thumbnail.imageUrl은 "외부에서 접근 가능한 https URL"이어야 합니다.
+# - 배포 시 PUBLIC_BASE_URL(예: https://your-domain.com)을 설정하면 /static 경로로 이미지 서빙이 가능합니다.
+_PUBLIC_BASE_URL = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+_STATIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+def _abs_url(path: str) -> str:
+    p = (path or "").strip()
+    if not p:
+        return ""
+    if p.startswith("http://") or p.startswith("https://"):
+        return p
+    # relative → absolute (배포 환경에서만 의미 있음)
+    if _PUBLIC_BASE_URL and p.startswith("/"):
+        return _PUBLIC_BASE_URL + p
+    return p
+
 # Ocean-themed Visual Assets (ARA Identity)
 IMG_KMOU_HOME = "https://images.unsplash.com/photo-1533596572767-021096785655?q=80&w=600&auto=format&fit=crop"  # 윤슬
 IMG_DEFAULT_WAVE = "https://images.unsplash.com/photo-1505228395891-9a51e7e86bf6?q=80&w=600&auto=format&fit=crop"  # 파도
@@ -63,8 +84,8 @@ def _img_url_or(fallback: str, *candidates: str) -> str:
     return fallback
 
 # User-provided anime-style illustrations (override via env or edit constants)
-IMG_SHUTTLE_NEW = os.environ.get("IMG_SHUTTLE_NEW") or "URL_FOR_IMAGE_1"
-IMG_BUS_190_NEW = os.environ.get("IMG_BUS_190_NEW") or "URL_FOR_IMAGE_2"
+IMG_SHUTTLE_NEW = _abs_url(os.environ.get("IMG_SHUTTLE_NEW") or "/static/shuttle_anime.png")
+IMG_BUS_190_NEW = _abs_url(os.environ.get("IMG_BUS_190_NEW") or "/static/bus190_anime.png")
 
 # Function-Specific Thumbnail Mapping (Visual Differentiation)
 _THUMBNAIL_MAP = {
