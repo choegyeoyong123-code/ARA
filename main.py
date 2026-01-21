@@ -934,23 +934,11 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     "messageText": f"연락처 {cat}",
                 }
             )
-        # listCard는 썸네일이 없으므로, 상단에 귀여운 썸네일 basicCard를 함께 출력(버튼 UX 유지)
-        intro = {
-            "basicCard": {
-                "title": "📞 캠퍼스 연락처",
-                "description": "원하는 분류를 선택하면 부서별 연락처를 보여줄게!",
-                "thumbnail": {"imageUrl": _THUMBNAIL_MAP.get("Contact", IMG_DEFAULT_WAVE)},
-                "buttons": [{"action": "message", "label": "KMOU 홈페이지", "messageText": "KMOU 홈페이지"}],
-            }
-        }
-        list_card = {
-            "listCard": {
-                "header": {"title": "📞 캠퍼스 연락처"},
-                "items": items or [{"title": "연락처", "description": "표시할 항목이 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
-                "buttons": [{"action": "message", "label": "KMOU 홈페이지", "messageText": "KMOU 홈페이지"}],
-            }
-        }
-        return _kakao_response([intro, list_card])
+        # 요구사항: 이미지 카드 제거 → 연락처 정보(listCard)만 제공
+        return _kakao_list_card(
+            header_title="📞 캠퍼스 연락처",
+            items=items or [{"title": "연락처", "description": "표시할 항목이 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
+        )
 
     m_contact_cat = re.match(r"^(연락처|contact)\s+(?P<cat>[A-Za-z_]+)\s*$", msg, flags=re.IGNORECASE)
     if m_contact_cat:
@@ -978,22 +966,11 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     "messageText": f"전화 {office}",
                 }
             )
-        intro = {
-            "basicCard": {
-                "title": f"📞 {payload.get('category_label') or cat}",
-                "description": "부서를 선택하면 바로 전화할 수 있어.",
-                "thumbnail": {"imageUrl": _THUMBNAIL_MAP.get("Contact", IMG_DEFAULT_WAVE)},
-                "buttons": [{"action": "message", "label": "다른 분류", "messageText": "캠퍼스 연락처"}],
-            }
-        }
-        list_card = {
-            "listCard": {
-                "header": {"title": f"📞 {payload.get('category_label') or cat}"},
-                "items": items or [{"title": "연락처", "description": "표시할 부서가 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
-                "buttons": [{"action": "message", "label": "다른 분류", "messageText": "캠퍼스 연락처"}],
-            }
-        }
-        return _kakao_response([intro, list_card])
+        # 요구사항: 이미지 카드 제거 → 연락처 정보(listCard)만 제공
+        return _kakao_list_card(
+            header_title=f"📞 {payload.get('category_label') or cat}",
+            items=items or [{"title": "연락처", "description": "표시할 부서가 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
+        )
 
     m_contact_office = re.match(r"^(전화|call)\s+(?P<office>[A-Za-z_]+)\s*$", msg, flags=re.IGNORECASE)
     if m_contact_office:
@@ -1003,21 +980,16 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         raw = get_campus_contacts(office=office, lang="ko")
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         if payload.get("status") != "success":
-            return _kakao_basic_card(
-                title="📞 캠퍼스 연락처",
-                description=_normalize_desc(payload.get("msg") or "해당 부서를 찾지 못했습니다."),
-                buttons=[{"action": "message", "label": "분류 다시 보기", "messageText": "캠퍼스 연락처"}],
+            return _kakao_list_card(
+                header_title="📞 캠퍼스 연락처",
+                items=[{"title": "안내", "description": _normalize_desc(payload.get("msg") or "해당 부서를 찾지 못했습니다.")}],
             )
         phone = payload.get("phone") or ""
         label = payload.get("office_label") or office
-        # Kakao basicCard: phone action으로 즉시 전화
-        return _kakao_basic_card(
-            title=f"📞 {label}",
-            description=_normalize_desc(str(phone)),
-            buttons=[
-                {"action": "phone", "label": "전화 걸기", "phoneNumber": str(phone)},
-                {"action": "message", "label": "다른 연락처", "messageText": "캠퍼스 연락처"},
-            ],
+        # 요구사항: 이미지 카드 제거 → 연락처 정보(listCard)만 제공
+        return _kakao_list_card(
+            header_title=f"📞 {label}",
+            items=[{"title": "전화번호", "description": _normalize_desc(str(phone))}],
         )
 
     # 날짜/공휴일 관련 질의는 LLM 추측을 원천 차단하고 calendar_2026.json만 신뢰합니다.
