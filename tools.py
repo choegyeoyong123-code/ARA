@@ -1051,21 +1051,24 @@ _BUS_190_KMOU_MAIN_TIMETABLE: Dict[str, List[str]] = {
 }
 
 _BUS_190_KMOU_MAIN_WEEKDAY_SCHEDULE_SIMPLE: List[str] = [
-    "08:00", "08:15", "08:30", "08:45",
-    "09:00", "09:10", "09:20", "09:30", "09:40", "09:50",
-    "10:00", "10:15", "10:30", "10:45",
-    "11:00", "11:15", "11:30", "11:45",
-    "12:00", "12:15", "12:30", "12:45",
-    "13:00", "13:15", "13:30", "13:45",
-    "14:00", "14:15", "14:30", "14:45",
-    "15:00", "15:15", "15:30", "15:45",
-    "16:00", "16:10", "16:20", "16:30", "16:40", "16:50",
-    "17:00", "17:15", "17:30", "17:45",
-    "18:00", "18:20", "18:40",
-    "19:00", "19:30",
-    "20:00", "20:30",
-    "21:00", "21:30",
-    "22:00",
+    "04:55",
+    "05:10", "05:25", "05:40", "05:55",
+    "06:10", "06:25", "06:40", "06:55",
+    "07:10", "07:27", "07:45",
+    "08:04", "08:23", "08:42",
+    "09:01", "09:20", "09:40",
+    "10:00", "10:20", "10:40",
+    "11:00", "11:20", "11:43",
+    "12:02", "12:21", "12:40", "12:59",
+    "13:18", "13:37", "13:56",
+    "14:15", "14:34", "14:54",
+    "15:12", "15:29", "15:47",
+    "16:07", "16:26", "16:45",
+    "17:04", "17:23", "17:42",
+    "18:01", "18:19", "18:39", "18:57",
+    "19:18", "19:37", "19:56",
+    "20:14", "20:34", "20:53",
+    "21:12", "21:30", "21:49"
 ]
 
 async def get_bus_190_kmou_main_next_departures(now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None) -> str:
@@ -1146,7 +1149,7 @@ async def get_bus_190_kmou_main_next_departures(now_hhmm: Optional[str] = None, 
 
 # 운행 시간(첫차/막차) — 공개 정보 기반 기본값(환경변수로 오버라이드 가능)
 _BUS_190_FIRST_BUS_HHMM = (os.environ.get("ARA_BUS_190_FIRST_BUS_HHMM") or "04:55").strip()
-_BUS_190_LAST_BUS_HHMM = (os.environ.get("ARA_BUS_190_LAST_BUS_HHMM") or "21:50").strip()
+_BUS_190_LAST_BUS_HHMM = (os.environ.get("ARA_BUS_190_LAST_BUS_HHMM") or "21:49").strip()
 
 # 실시간 위치 API(프로젝트 외부 연동용)
 # - 이 레포에는 "부산 BIMS 차량별 GPS" 공식 엔드포인트가 포함되어 있지 않아, URL/파라미터는 환경변수로 주입합니다.
@@ -2200,6 +2203,205 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
     payload = {"status": "success", "source": "youth_center_work24", "query": q, "jobs": out}
     _yc_cache_set(cache_key, payload)
     return json.dumps(payload, ensure_ascii=False)
+
+async def get_youth_jobs(keyword: Optional[str] = None) -> str:
+    """
+    Stable & Error-Free Employment Data Fetching from Youth Center API.
+    - Philosophy: Stability First. Fail gracefully with helpful fallback.
+    - API: https://www.youthcenter.go.kr/opi/youthPolicyList.do
+    - Always returns valid JSON compatible with KakaoTalk API.
+    """
+    import xmltodict
+
+    # API Configuration
+    api_url = "https://www.youthcenter.go.kr/opi/youthPolicyList.do"
+    api_key = "ba0aad9d-c862-410c-90ac-130b556e370e"
+    default_thumbnail = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop"
+    timeout_seconds = 4.0  # Strict 4 seconds (Kakao limit is 5s)
+
+    # Normalize keyword - default to '취업' if empty or vague
+    q = (keyword or "").strip()
+    if not q or len(q) < 2:
+        q = "취업"
+
+    try:
+        # Prepare request parameters
+        params = {
+            "openApiVlak": api_key,
+            "display": "5",
+            "pageIndex": "1",
+            "query": q
+        }
+
+        # Make API request with strict timeout
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/xml,text/xml,*/*"
+        }
+
+        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers, timeout=timeout_seconds) as client:
+            response = await client.get(api_url, params=params)
+            response.raise_for_status()
+
+            if response.status_code != 200:
+                raise RuntimeError(f"HTTP {response.status_code}")
+
+            xml_text = response.text or ""
+            if not xml_text.strip():
+                raise RuntimeError("Empty response")
+
+            # Check if response is HTML (error page)
+            if xml_text.lstrip().lower().startswith("<html"):
+                raise RuntimeError("HTML response received instead of XML")
+
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as e:
+        # Connection/Timeout errors - return user-friendly message
+        return json.dumps({
+            "status": "error",
+            "msg": "지금 정부 서버랑 연결이 조금 지연되고 있어! 잠시 후에 다시 물어봐줄래? 🔧",
+            "query": q,
+            "policies": []
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        # Log for debugging but return graceful error
+        print(f"[ARA Log] Youth Jobs API Error: {e}")
+        return json.dumps({
+            "status": "error",
+            "msg": "지금 정부 서버랑 연결이 조금 지연되고 있어! 잠시 후에 다시 물어봐줄래? 🔧",
+            "query": q,
+            "policies": []
+        }, ensure_ascii=False)
+
+    # Robust XML Parsing
+    try:
+        parsed = xmltodict.parse(xml_text)
+        
+        # Navigate to youthPolicyList
+        youth_policy_list = None
+        if isinstance(parsed, dict):
+            # Try different possible structures
+            if "youthPolicyList" in parsed:
+                youth_policy_list = parsed["youthPolicyList"]
+            elif "response" in parsed and isinstance(parsed["response"], dict):
+                if "youthPolicyList" in parsed["response"]:
+                    youth_policy_list = parsed["response"]["youthPolicyList"]
+                elif "body" in parsed["response"] and isinstance(parsed["response"]["body"], dict):
+                    if "youthPolicyList" in parsed["response"]["body"]:
+                        youth_policy_list = parsed["response"]["body"]["youthPolicyList"]
+
+        if not youth_policy_list:
+            # Log raw response for debugging (status 200 but empty data)
+            print(f"[ARA Log] Youth Jobs API: Status 200 but no youthPolicyList found. Response preview: {xml_text[:200]}")
+            
+            # Try fallback search with '청년'
+            if q != "청년":
+                return await get_youth_jobs("청년")
+            
+            return json.dumps({
+                "status": "empty",
+                "msg": "지금 정부 서버랑 연결이 조금 지연되고 있어! 잠시 후에 다시 물어봐줄래? 🔧",
+                "query": q,
+                "policies": []
+            }, ensure_ascii=False)
+
+        # Handle totalCnt check
+        total_cnt = 0
+        if isinstance(youth_policy_list, dict):
+            total_cnt_str = str(youth_policy_list.get("totalCnt", "0") or "0")
+            try:
+                total_cnt = int(total_cnt_str)
+            except (ValueError, TypeError):
+                total_cnt = 0
+        
+        # If totalCnt is 0, try fallback search with '청년'
+        if total_cnt == 0 and q != "청년":
+            return await get_youth_jobs("청년")
+
+        # Extract youthPolicy - handle both single dict and list
+        youth_policies = []
+        if isinstance(youth_policy_list, dict):
+            if "youthPolicy" in youth_policy_list:
+                policy_data = youth_policy_list["youthPolicy"]
+                # Convert single dict to list
+                if isinstance(policy_data, dict):
+                    youth_policies = [policy_data]
+                elif isinstance(policy_data, list):
+                    youth_policies = policy_data
+
+        # Normalize items for KakaoTalk UI
+        items = []
+        for policy in youth_policies:
+            if not isinstance(policy, dict):
+                continue
+
+            # Extract fields
+            policy_name = (
+                policy.get("polyBizSjnm") or 
+                policy.get("polyBizSjNm") or 
+                policy.get("policyName") or 
+                policy.get("name") or 
+                ""
+            ).strip()
+
+            intro = (
+                policy.get("polyItcnCn") or 
+                policy.get("polyItcnCnNm") or 
+                policy.get("intro") or 
+                policy.get("summary") or 
+                ""
+            ).strip()
+
+            biz_id = (
+                policy.get("bizId") or 
+                policy.get("bizid") or 
+                ""
+            ).strip()
+
+            # Truncate intro to 40 chars for description
+            intro_short = intro[:40] if len(intro) > 40 else intro
+
+            # Build detail URL using bizId
+            detail_url = f"https://www.youthcenter.go.kr/youngPlcyUnif/youngPlcyUnifDtl.do?bizId={biz_id}" if biz_id else "https://www.youthcenter.go.kr"
+
+            if policy_name:
+                items.append({
+                    "policyName": policy_name,
+                    "polyItcnCn": intro_short,
+                    "bizId": biz_id,
+                    "detail_url": detail_url,
+                    "thumbnail": default_thumbnail
+                })
+
+        if not items:
+            # Try fallback search if no items found
+            if q != "청년":
+                return await get_youth_jobs("청년")
+            
+            return json.dumps({
+                "status": "empty",
+                "msg": "지금 정부 서버랑 연결이 조금 지연되고 있어! 잠시 후에 다시 물어봐줄래? 🔧",
+                "query": q,
+                "policies": []
+            }, ensure_ascii=False)
+
+        # Return success response
+        return json.dumps({
+            "status": "success",
+            "source": "youth_center_policy",
+            "query": q,
+            "policies": items
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        # XML parsing errors
+        print(f"[ARA Log] Youth Jobs XML Parsing Error: {e}")
+        return json.dumps({
+            "status": "error",
+            "msg": "지금 정부 서버랑 연결이 조금 지연되고 있어! 잠시 후에 다시 물어봐줄래? 🔧",
+            "query": q,
+            "policies": []
+        }, ensure_ascii=False)
 
 async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lang: str = "ko") -> str:
     import requests

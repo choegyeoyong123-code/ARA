@@ -52,6 +52,25 @@ _KMOU_SPECIALIZED_DICTIONARY: dict[str, list[str]] = {
     "제보": ["제보", "추천", "맛집제보", "등록", "제보하기", "재보", "추천하기"],
     "취업": ["취업", "채용", "일자리", "공고", "워크넷", "취업정보", "구인", "추업"],
 }
+
+# English keyword mapping to Korean intents
+_ENGLISH_INTENT_MAPPING: dict[str, str] = {
+    "bus": "버스",
+    "shuttle": "셔틀",
+    "190": "190",
+    "transport": "버스",
+    "food": "맛집",
+    "cafeteria": "학식",
+    "menu": "학식",
+    "lunch": "학식",
+    "job": "취업",
+    "career": "취업",
+    "work": "취업",
+    "policy": "취업",
+    "hospital": "의료",
+    "pharmacy": "의료",
+    "sick": "의료",
+}
 _KMOU_DICT_FLAT: list[tuple[str, str]] = []
 
 def _norm_for_fuzz(s: str) -> str:
@@ -182,15 +201,15 @@ def _t(key: str) -> str:
 def _nav_quick_replies(lang: str) -> list[dict]:
     if lang == "en":
         base = [
-            {"label": "🕒 190 Departs (KMOU Main)", "action": "message", "messageText": "190 해양대구본관 출발"},
-            {"label": "🍱 Cafeteria", "action": "message", "messageText": "cafeteria menu"},
-            {"label": "🚐 Shuttle", "action": "message", "messageText": "shuttle"},
+            {"label": "🕒 Bus 190 (Old Main)", "action": "message", "messageText": "bus 190 old main depart"},
+            {"label": "🍱 Cafeteria", "action": "message", "messageText": "cafeteria"},
+            {"label": "🚐 Shuttle Bus", "action": "message", "messageText": "shuttle"},
             {"label": "🌤️ Weather", "action": "message", "messageText": "weather"},
-            {"label": "🍚 Restaurants", "action": "message", "messageText": "food"},
-            {"label": "💼 Jobs", "action": "message", "messageText": "취업"},
-            {"label": "📞 Contact", "action": "message", "messageText": "contact"},
-            {"label": "🏫 Home", "action": "message", "messageText": "home"},
-            {"label": "한국어 모드", "action": "message", "messageText": "__toggle_lang__"},
+            {"label": "🍚 Food Picks", "action": "message", "messageText": "food"},
+            {"label": "💼 Career/Policy", "action": "message", "messageText": "career"},
+            {"label": "📞 Contacts", "action": "message", "messageText": "contact"},
+            {"label": "🏫 Homepage", "action": "message", "messageText": "home"},
+            {"label": "🌐 Korean Mode", "action": "message", "messageText": "__toggle_lang__"},
         ]
         return base
 
@@ -203,7 +222,7 @@ def _nav_quick_replies(lang: str) -> list[dict]:
         {"label": "취업", "action": "message", "messageText": "취업"},
         {"label": "캠퍼스 연락처", "action": "message", "messageText": "캠퍼스 연락처"},
         {"label": "학교 홈피", "action": "message", "messageText": "KMOU 홈페이지"},
-        {"label": "English Mode", "action": "message", "messageText": "__toggle_lang__"},
+        {"label": "🌐 English Mode", "action": "message", "messageText": "__toggle_lang__"},
     ]
     return base
 
@@ -631,14 +650,22 @@ async def _run_with_timeout(coro, timeout: float):
 def _is_bus_query(text: str) -> bool:
     """
     'B3' 같은 건물 코드가 버스로 오인되지 않도록 보수적으로 판별합니다.
+    Supports both Korean and English keywords.
     """
     t = (text or "").lower()
+    # Korean keywords
     if "버스" in t or "bus" in t:
         return True
     if re.search(r"\b(in|out)\b", t):
         return True
-    # 버스 번호는 보통 2자리 이상
+    # English bus keywords
+    if any(k in t for k in ["shuttle", "transport", "depart", "schedule", "old main", "kmou main"]):
+        return True
+    # Bus number patterns (Korean)
     if re.search(r"\d{2,4}", t) and any(k in t for k in ["도착", "정류장", "언제", "몇", "분", "시간"]):
+        return True
+    # Bus number patterns (English)
+    if re.search(r"\d{2,4}", t) and any(k in t for k in ["arrival", "stop", "when", "time", "min", "minute", "depart"]):
         return True
     return False
 
@@ -797,7 +824,14 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         elif dict_intent == "취업":
             msg = orig_msg
 
-    if ("190" in msg) and (("해양대구본관" in msg) or ("구본관" in msg)) and any(k in msg for k in ["출발", "시간표", "언제", "다음", "몇분", "몇 분"]):
+    # Bus 190 - Support both Korean and English keywords
+    msg_lower = msg.lower()
+    is_bus_190_query = (
+        (("190" in msg) and (("해양대구본관" in msg) or ("구본관" in msg)) and any(k in msg for k in ["출발", "시간표", "언제", "다음", "몇분", "몇 분"]))
+        or (("190" in msg_lower or "bus" in msg_lower or "shuttle" in msg_lower) and any(k in msg_lower for k in ["depart", "schedule", "when", "next", "time", "old main", "kmou main"]))
+    )
+    
+    if is_bus_190_query:
         from tools import get_bus_190_kmou_main_next_departures
 
         raw = await get_bus_190_kmou_main_next_departures()
@@ -805,43 +839,68 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         if not isinstance(payload, dict):
             payload = {}
 
-        thumb = {"imageUrl": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop"}
+        thumb = {"imageUrl": "https://images.unsplash.com/photo-1570125909232-eb2b9b1de9ea?q=80&w=600&auto=format&fit=crop"}
         timetable_url = "https://www.kmou.ac.kr/kmou/cm/cntnts/cntntsView.do?mi=2036&cntntsId=356"
-        buttons = [{"action": "webLink", "label": "전체 시간표 확인", "webLinkUrl": timetable_url}]
+        
+        # Language-specific UI
+        if lang == "en":
+            buttons = [{"action": "webLink", "label": "View Full Timetable", "webLinkUrl": timetable_url}]
+            
+            if payload.get("status") == "ENDED":
+                return _kakao_basic_card(
+                    title="🚌 Bus 190 (Departing Old Main)",
+                    description=_normalize_desc_preserve_lines("Today's Bus 190 service has ended (Last bus 21:49). Tomorrow's first bus is at 04:55! 🌙"),
+                    thumbnail=thumb,
+                    buttons=buttons,
+                )
 
-        if payload.get("status") == "ENDED":
+            nxt = payload.get("next") or {}
+            nxt2 = payload.get("next2") or {}
+            t1 = (nxt.get("time") or "").strip()
+            r1 = nxt.get("remaining_min")
+            t2 = (nxt2.get("time") or "").strip() if isinstance(nxt2, dict) else ""
+
+            first_line = f"🚀 Next Bus: {t1}"
+            if isinstance(r1, int):
+                first_line += f" ({r1} min left)"
+            second_line = f"🚍 Following: {t2}" if t2 else "🚍 Following: Last bus"
+            desc = "\n".join([first_line, second_line]).strip()
+
             return _kakao_basic_card(
-                title="🚌 190번 버스 (구본관 출발)",
-                description=_normalize_desc_preserve_lines("오늘 운행은 모두 종료되었어! 🌙"),
+                title="🚌 Bus 190 (Departing Old Main)",
+                description=_normalize_desc_preserve_lines(desc),
                 thumbnail=thumb,
                 buttons=buttons,
             )
+        else:
+            buttons = [{"action": "webLink", "label": "전체 시간표 확인", "webLinkUrl": timetable_url}]
 
-        nxt = payload.get("next") or {}
-        nxt2 = payload.get("next2") or {}
-        t1 = (nxt.get("time") or "").strip()
-        r1 = nxt.get("remaining_min")
-        t2 = (nxt2.get("time") or "").strip() if isinstance(nxt2, dict) else ""
+            if payload.get("status") == "ENDED":
+                return _kakao_basic_card(
+                    title="🚌 190번 버스 (구본관 출발)",
+                    description=_normalize_desc_preserve_lines("오늘 190번 운행은 종료되었어 (막차 21:49). 내일 첫차는 04:55야! 🌙"),
+                    thumbnail=thumb,
+                    buttons=buttons,
+                )
 
-        persona = ""
-        if isinstance(r1, int):
-            if r1 <= 3:
-                persona = "지금 뛰면 탈 수 있어!"
-            elif r1 >= 10:
-                persona = "여유 좀 있네."
+            nxt = payload.get("next") or {}
+            nxt2 = payload.get("next2") or {}
+            t1 = (nxt.get("time") or "").strip()
+            r1 = nxt.get("remaining_min")
+            t2 = (nxt2.get("time") or "").strip() if isinstance(nxt2, dict) else ""
 
-        first_line = f"1️⃣ 이번 차: {t1}"
-        if isinstance(r1, int):
-            first_line += f" ({r1}분 남음)"
-        second_line = f"2️⃣ 다음 차: {t2}" if t2 else "2️⃣ 다음 차: 막차입니다."
-        desc = "\n".join([x for x in [persona, first_line, second_line] if x]).strip()
+            first_line = f"🚀 이번 차: {t1}"
+            if isinstance(r1, int):
+                first_line += f" ({r1}분 전)"
+            second_line = f"🚍 다음 차: {t2}" if t2 else "🚍 다음 차: 막차입니다."
+            desc = "\n".join([first_line, second_line]).strip()
 
-        return _kakao_basic_card(
-            title="🚌 190번 버스 (구본관 출발)",
-            description=_normalize_desc_preserve_lines(desc),
-            thumbnail=thumb,
-            buttons=buttons,
-        )
+            return _kakao_basic_card(
+                title="🚌 190번 버스 (구본관 출발)",
+                description=_normalize_desc_preserve_lines(desc),
+                thumbnail=thumb,
+                buttons=buttons,
+            )
 
     # 인터랙션 로그(프로토타입): 자주 묻는 질문/의도 집계를 위해 저장(응답에는 절대 노출하지 않음)
     try:
@@ -1056,33 +1115,50 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             ],
         )
 
-    if any(k in msg for k in ["취업", "취업/정책", "채용", "일자리", "공고", "워크넷", "worknet", "job", "jobs", "career", "청년", "지원금", "수당", "정책"]):
+    # Career/Jobs - Support both Korean and English keywords
+    msg_lower = msg.lower()
+    is_career_query = any(k in msg for k in ["취업", "취업/정책", "채용", "일자리", "공고", "워크넷", "청년", "지원금", "수당", "정책"]) or any(k in msg_lower for k in ["worknet", "job", "jobs", "career", "policy", "employment"])
+    
+    if is_career_query:
         if _career_rate_limited(user_id):
             return _kakao_basic_card(
                 title=("Career" if lang == "en" else "커리어 가속"),
-                description=_normalize_desc("워워, 천천히 물어봐도 다 답해줄 수 있어! 조금만 숨 돌리고 오자."),
+                description=_normalize_desc("워워, 천천히 물어봐도 다 답해줄 수 있어! 조금만 숨 돌리고 오자." if lang != "en" else "Whoa, slow down! I can answer everything. Let's take a breather."),
                 buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
             )
 
-        intent, score, kw = _career_best_intent(msg)
-        if intent and 65 <= score <= 74:
-            return _kakao_basic_card(
-                title=("Career" if lang == "en" else "커리어 가속"),
-                description=_normalize_desc(f"혹시 {intent.replace('_', ' ')} 쪽을 찾으시는 건가요?"),
-                buttons=[
-                    {"action": "message", "label": ("Maritime/Engineering" if lang == "en" else "해양/공학"), "messageText": "해운 채용"},
-                    {"action": "message", "label": ("Office/Tax" if lang == "en" else "사무/세무"), "messageText": "세무 채용"},
-                    {"action": "message", "label": ("Youth Policy" if lang == "en" else "청년정책"), "messageText": "청년지원 정책"},
-                ],
-            )
-
-        keyword = (kw or "").strip() or _extract_worknet_keyword(msg)
-        if any(k in msg for k in ["세무", "회계", "법", "변호", "노무", "행정", "인사", "총무", "마케팅", "경영"]):
-            keyword = " ".join([x for x in ["세무" if "세무" in msg else "", "회계" if "회계" in msg else "", "법" if "법" in msg else ""] if x]).strip() or keyword
+        # Map English keywords to Korean for API search
+        search_keyword = None
+        if lang == "en":
+            # English keywords -> Korean search terms
+            if any(k in msg_lower for k in ["job", "jobs", "career", "work", "employment"]):
+                search_keyword = "취업"
+            elif any(k in msg_lower for k in ["policy", "youth", "support"]):
+                search_keyword = "청년"
+            else:
+                search_keyword = "취업"  # Default fallback
+        else:
+            # Korean keywords - use existing logic
+            intent, score, kw = _career_best_intent(msg)
+            if intent and 65 <= score <= 74:
+                return _kakao_basic_card(
+                    title=("Career" if lang == "en" else "커리어 가속"),
+                    description=_normalize_desc(f"혹시 {intent.replace('_', ' ')} 쪽을 찾으시는 건가요?"),
+                    buttons=[
+                        {"action": "message", "label": ("Maritime/Engineering" if lang == "en" else "해양/공학"), "messageText": "해운 채용"},
+                        {"action": "message", "label": ("Office/Tax" if lang == "en" else "사무/세무"), "messageText": "세무 채용"},
+                        {"action": "message", "label": ("Youth Policy" if lang == "en" else "청년정책"), "messageText": "청년지원 정책"},
+                    ],
+                )
+            keyword = (kw or "").strip() or _extract_worknet_keyword(msg)
+            if any(k in msg for k in ["세무", "회계", "법", "변호", "노무", "행정", "인사", "총무", "마케팅", "경영"]):
+                keyword = " ".join([x for x in ["세무" if "세무" in msg else "", "회계" if "회계" in msg else "", "법" if "법" in msg else ""] if x]).strip() or keyword
+            search_keyword = keyword
 
         from tools import get_youth_center_info
 
-        raw = await get_youth_center_info(query=keyword, limit=10, lang=lang)
+        # Always search with Korean keyword (API requires Korean)
+        raw = await get_youth_center_info(query=search_keyword, limit=10, lang="ko")
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         if not isinstance(payload, dict):
             payload = {}
@@ -1101,6 +1177,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
 
         policies = (payload.get("policies") or [])[:10]
         cards = []
+        default_thumbnail = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop"
+        
         def _short40(s: str) -> str:
             t = (s or "").strip()
             t = re.sub(r"\s+", " ", t)
@@ -1111,17 +1189,34 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         for j in policies:
             if not isinstance(j, dict):
                 continue
+            # Keep Korean title for accuracy (prevent hallucination)
             title = (j.get("policyName") or j.get("name") or j.get("title") or "청년정책").strip()
             itcn = (j.get("polyItcnCn") or j.get("intro") or "").strip()
             prd = (j.get("bizPrdCn") or j.get("period") or "").strip()
             link = (j.get("detail_url") or j.get("url") or "").strip() or "https://www.youthcenter.go.kr"
-            desc = "\n".join([x for x in [_short40(itcn), prd] if x]).strip() or "정보를 확인 중입니다"
-            if not cards and lang != "en":
-                desc = "지금 딱 맞는 정보를 찾았어! 네 꿈에 한 발짝 더 가까워지길 바랄게.\n\n" + desc
+            
+            # Language-specific description
+            if lang == "en":
+                # English mode: Translate labels but keep Korean policy names
+                desc_parts = []
+                if itcn:
+                    desc_parts.append(_short40(itcn))
+                if prd:
+                    desc_parts.append(f"Deadline: {prd}")
+                desc = " / ".join(desc_parts) if desc_parts else "Information being verified"
+                if not cards:
+                    desc = "Found the perfect match for you! One step closer to your dreams.\n\n" + desc
+            else:
+                # Korean mode: Original format
+                desc = "\n".join([x for x in [_short40(itcn), prd] if x]).strip() or "정보를 확인 중입니다"
+                if not cards:
+                    desc = "지금 딱 맞는 정보를 찾았어! 네 꿈에 한 발짝 더 가까워지길 바랄게.\n\n" + desc
+            
             cards.append(
                 {
                     "title": title[:50],
                     "description": _normalize_desc_preserve_lines(desc),
+                    "thumbnail": {"imageUrl": default_thumbnail},
                     "buttons": [{"action": "webLink", "label": ("Details" if lang == "en" else "자세히"), "webLinkUrl": link}],
                 }
             )
@@ -1195,43 +1290,68 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         if not isinstance(payload, dict):
             payload = {}
 
-        thumb = {"imageUrl": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop"}
+        thumb = {"imageUrl": "https://images.unsplash.com/photo-1570125909232-eb2b9b1de9ea?q=80&w=600&auto=format&fit=crop"}
         timetable_url = "https://www.kmou.ac.kr/kmou/cm/cntnts/cntntsView.do?mi=2036&cntntsId=356"
-        buttons = [{"action": "webLink", "label": "전체 시간표 확인", "webLinkUrl": timetable_url}]
+        
+        # Language-specific UI
+        if lang == "en":
+            buttons = [{"action": "webLink", "label": "View Full Timetable", "webLinkUrl": timetable_url}]
 
-        if payload.get("status") == "ENDED":
+            if payload.get("status") == "ENDED":
+                return _kakao_basic_card(
+                    title="🚌 Bus 190 (Departing Old Main)",
+                    description=_normalize_desc_preserve_lines("Today's Bus 190 service has ended (Last bus 21:49). Tomorrow's first bus is at 04:55! 🌙"),
+                    thumbnail=thumb,
+                    buttons=buttons,
+                )
+
+            nxt = payload.get("next") or {}
+            nxt2 = payload.get("next2") or {}
+            t1 = (nxt.get("time") or "").strip()
+            r1 = nxt.get("remaining_min")
+            t2 = (nxt2.get("time") or "").strip() if isinstance(nxt2, dict) else ""
+
+            first_line = f"🚀 Next Bus: {t1}"
+            if isinstance(r1, int):
+                first_line += f" ({r1} min left)"
+            second_line = f"🚍 Following: {t2}" if t2 else "🚍 Following: Last bus"
+            desc = "\n".join([first_line, second_line]).strip()
+
             return _kakao_basic_card(
-                title="🚌 190번 버스 (구본관 출발)",
-                description=_normalize_desc_preserve_lines("오늘 운행은 모두 종료되었어! 🌙"),
+                title="🚌 Bus 190 (Departing Old Main)",
+                description=_normalize_desc_preserve_lines(desc),
                 thumbnail=thumb,
                 buttons=buttons,
             )
+        else:
+            buttons = [{"action": "webLink", "label": "전체 시간표 확인", "webLinkUrl": timetable_url}]
 
-        nxt = payload.get("next") or {}
-        nxt2 = payload.get("next2") or {}
-        t1 = (nxt.get("time") or "").strip()
-        r1 = nxt.get("remaining_min")
-        t2 = (nxt2.get("time") or "").strip() if isinstance(nxt2, dict) else ""
+            if payload.get("status") == "ENDED":
+                return _kakao_basic_card(
+                    title="🚌 190번 버스 (구본관 출발)",
+                    description=_normalize_desc_preserve_lines("오늘 190번 운행은 종료되었어 (막차 21:49). 내일 첫차는 04:55야! 🌙"),
+                    thumbnail=thumb,
+                    buttons=buttons,
+                )
 
-        persona = ""
-        if isinstance(r1, int):
-            if r1 <= 3:
-                persona = "지금 뛰면 탈 수 있어!"
-            elif r1 >= 10:
-                persona = "여유 좀 있네."
+            nxt = payload.get("next") or {}
+            nxt2 = payload.get("next2") or {}
+            t1 = (nxt.get("time") or "").strip()
+            r1 = nxt.get("remaining_min")
+            t2 = (nxt2.get("time") or "").strip() if isinstance(nxt2, dict) else ""
 
-        first_line = f"1️⃣ 이번 차: {t1}"
-        if isinstance(r1, int):
-            first_line += f" ({r1}분 남음)"
-        second_line = f"2️⃣ 다음 차: {t2}" if t2 else "2️⃣ 다음 차: 막차입니다."
-        desc = "\n".join([x for x in [persona, first_line, second_line] if x]).strip()
+            first_line = f"🚀 이번 차: {t1}"
+            if isinstance(r1, int):
+                first_line += f" ({r1}분 전)"
+            second_line = f"🚍 다음 차: {t2}" if t2 else "🚍 다음 차: 막차입니다."
+            desc = "\n".join([first_line, second_line]).strip()
 
-        return _kakao_basic_card(
-            title="🚌 190번 버스 (구본관 출발)",
-            description=_normalize_desc_preserve_lines(desc),
-            thumbnail=thumb,
-            buttons=buttons,
-        )
+            return _kakao_basic_card(
+                title="🚌 190번 버스 (구본관 출발)",
+                description=_normalize_desc_preserve_lines(desc),
+                thumbnail=thumb,
+                buttons=buttons,
+            )
 
     # Home
     if ("홈페이지" in msg) or ("kmou" in msg.lower()) or ("학교 홈페이지" in msg) or ("KMOU 홈페이지" in msg) or (msg.lower().strip() in {"home", "homepage"}):
