@@ -454,9 +454,15 @@ def _kakao_basic_card(
     thumbnail: dict | None = None,
     quick_replies: list[dict] | None = None,
 ):
-    card: dict = {"title": title, "description": description}
-    if thumbnail:
-        card["thumbnail"] = thumbnail
+    # Mandatory thumbnail to prevent Kakao Error 2461
+    default_thumbnail = {
+        "imageUrl": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop"
+    }
+    card: dict = {
+        "title": title,
+        "description": description,
+        "thumbnail": thumbnail or default_thumbnail
+    }
     if buttons:
         card["buttons"] = buttons
     return _kakao_response([{"basicCard": card}], quick_replies=quick_replies)
@@ -1003,9 +1009,9 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         if payload.get("status") != "success":
             return _kakao_basic_card(
-                title=("Cafe" if lang == "en" else "카페/커피"),
+                title="카페/커피",
                 description=_normalize_desc(payload.get("msg") or "조건에 맞는 결과를 찾지 못했습니다."),
-                buttons=[{"action": "message", "label": ("다시 검색" if lang != "en" else "Retry"), "messageText": ("카페" if lang != "en" else "coffee")}],
+                buttons=[{"action": "message", "label": "다시 검색", "messageText": "카페"}],
             )
         items = []
         for r in (payload.get("restaurants") or [])[:5]:
@@ -1015,16 +1021,16 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             items.append({"title": name[:50], "description": _normalize_desc(addr), "link": {"web": (link or _map_search_link(name))}})
         if not items:
             return _kakao_basic_card(
-                title=("Cafe" if lang == "en" else "카페/커피"),
-                description=("정보를 확인 중입니다" if lang != "en" else "Data is being verified."),
-                buttons=[{"action": "message", "label": ("다시 검색" if lang != "en" else "Retry"), "messageText": ("카페" if lang != "en" else "coffee")}],
+                title="카페/커피",
+                description="정보를 확인 중입니다",
+                buttons=[{"action": "message", "label": "다시 검색", "messageText": "카페"}],
             )
         return _kakao_list_card(
-            header_title=(f"부산광역시 영도구 카페: {payload.get('query','')}" if lang != "en" else f"Cafes in Yeongdo-gu: {payload.get('query','')}"),
+            header_title=f"부산광역시 영도구 카페: {payload.get('query','')}",
             items=items or [{"title": "검색 결과", "description": "표시할 결과가 없습니다.", "link": {"web": _map_search_link(msg)}}],
             buttons=[
-                {"action": "message", "label": ("맛집 랜덤" if lang != "en" else "Random food"), "messageText": "맛집"},
-                {"action": "message", "label": ("맛집 제보하기" if lang != "en" else "Suggest a place"), "messageText": "맛집 제보하기"},
+                {"action": "message", "label": "맛집 랜덤", "messageText": "맛집"},
+                {"action": "message", "label": "맛집 제보하기", "messageText": "맛집 제보하기"},
             ],
         )
 
@@ -1034,15 +1040,15 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             save_food_contribution(user_id=user_id, text=msg)
             save_restaurant_report(user_id=user_id, reported_text=msg)
             return _kakao_basic_card(
-                title=("맛집 제보 완료" if lang != "en" else "Suggestion received"),
-                description=("제보 고마워요. 제가 바로 DB에 저장해두고, 검토되면 반영될 수 있게 해둘게요." if lang != "en" else "Thanks! Saved to DB for review."),
-                buttons=[{"action": "message", "label": ("맛집 보기" if lang != "en" else "Find food"), "messageText": "맛집"}],
+                title="맛집 제보 완료",
+                description="제보 고마워요. 제가 바로 DB에 저장해두고, 검토되면 반영될 수 있게 해둘게요.",
+                buttons=[{"action": "message", "label": "맛집 보기", "messageText": "맛집"}],
             )
         except Exception:
             return _kakao_basic_card(
-                title=("맛집 제보" if lang != "en" else "Suggestion"),
-                description=("정보를 확인 중입니다" if lang != "en" else "Data is being verified."),
-                buttons=[{"action": "message", "label": ("다시 시도" if lang != "en" else "Retry"), "messageText": "맛집 제보하기"}],
+                title="맛집 제보",
+                description="정보를 확인 중입니다",
+                buttons=[{"action": "message", "label": "다시 시도", "messageText": "맛집 제보하기"}],
             )
 
     # Cafeteria menu: 크롤링 폐기 → KMOU Coop 사이트로 바로 연결
@@ -1173,6 +1179,16 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             prd = (j.get("bizPrdCn") or j.get("period") or "").strip()
             link = (j.get("detail_url") or j.get("url") or "").strip() or "https://www.youthcenter.go.kr"
             
+            # Get thumbnail URL - ensure it's never empty
+            DEFAULT_THUMB = "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop"
+            thumb_from_policy = j.get("thumbnail")
+            if isinstance(thumb_from_policy, dict):
+                thumbnail_url = thumb_from_policy.get("imageUrl") or DEFAULT_THUMB
+            elif isinstance(thumb_from_policy, str):
+                thumbnail_url = thumb_from_policy or DEFAULT_THUMB
+            else:
+                thumbnail_url = DEFAULT_THUMB
+            
             # Korean description format
             desc = "\n".join([x for x in [_short40(itcn), prd] if x]).strip() or "정보를 확인 중입니다"
             if not cards:
@@ -1232,12 +1248,10 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
     if msg == "맛집 제보하기":
         _pending_set(user_id, "restaurant_report")
         return _kakao_basic_card(
-            title=("맛집 제보하기" if lang != "en" else "Suggest a place"),
-            description=("아래 형식으로 한 번에 보내주세요:\n가게명 / 주소(영도구) / 한 줄 추천"
-                         if lang != "en"
-                         else "Send in one message:\nName / Address(Yeongdo) / One-line recommendation"),
+            title="맛집 제보하기",
+            description="아래 형식으로 한 번에 보내주세요:\n가게명 / 주소(영도구) / 한 줄 추천",
             buttons=[
-                {"action": "message", "label": ("취소" if lang != "en" else "Cancel"), "messageText": "맛집"},
+                {"action": "message", "label": "취소", "messageText": "맛집"},
             ],
         )
 

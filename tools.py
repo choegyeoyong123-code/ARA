@@ -372,13 +372,13 @@ def get_campus_contacts(category: Optional[str] = None, office: Optional[str] = 
                         "mode": "office",
                         "category": cat,
                         "office": key,
-                        "office_label": (_pretty_key(key) if lang == "en" else (_CONTACT_OFFICE_KO.get(key) or _pretty_key(key))),
+                        "office_label": (_CONTACT_OFFICE_KO.get(key) or _pretty_key(key)),
                         "phone": mp[key],
                     },
                     ensure_ascii=False,
                 )
         return json.dumps(
-            {"status": "empty", "msg": ("Contact not found." if lang == "en" else "해당 연락처를 찾지 못했습니다.")},
+            {"status": "empty", "msg": "해당 연락처를 찾지 못했습니다."},
             ensure_ascii=False,
         )
 
@@ -387,13 +387,13 @@ def get_campus_contacts(category: Optional[str] = None, office: Optional[str] = 
         mp = _CAMPUS_CONTACT_DIRECTORY.get(cat)
         if not mp:
             return json.dumps(
-                {"status": "empty", "msg": ("Category not found." if lang == "en" else "해당 분류를 찾지 못했습니다.")},
+                {"status": "empty", "msg": "해당 분류를 찾지 못했습니다."},
                 ensure_ascii=False,
             )
         contacts = [
             {
                 "office": k,
-                "office_label": (_pretty_key(k) if lang == "en" else (_CONTACT_OFFICE_KO.get(k) or _pretty_key(k))),
+                "office_label": (_CONTACT_OFFICE_KO.get(k) or _pretty_key(k)),
                 "phone": v,
             }
             for k, v in mp.items()
@@ -403,7 +403,7 @@ def get_campus_contacts(category: Optional[str] = None, office: Optional[str] = 
                 "status": "success",
                 "mode": "category",
                 "category": cat,
-                "category_label": (_pretty_key(cat) if lang == "en" else (_CONTACT_CATEGORY_KO.get(cat) or _pretty_key(cat))),
+                "category_label": (_CONTACT_CATEGORY_KO.get(cat) or _pretty_key(cat)),
                 "contacts": contacts,
             },
             ensure_ascii=False,
@@ -412,7 +412,7 @@ def get_campus_contacts(category: Optional[str] = None, office: Optional[str] = 
     categories = [
         {
             "category": c,
-            "category_label": (_pretty_key(c) if lang == "en" else (_CONTACT_CATEGORY_KO.get(c) or _pretty_key(c))),
+            "category_label": (_CONTACT_CATEGORY_KO.get(c) or _pretty_key(c)),
             "count": len(mp),
         }
         for c, mp in _CAMPUS_CONTACT_DIRECTORY.items()
@@ -1117,24 +1117,23 @@ _BUS_190_KMOU_MAIN_TIMETABLE: Dict[str, List[str]] = {
 }
 
 _BUS_190_KMOU_MAIN_WEEKDAY_SCHEDULE_SIMPLE: List[str] = [
-    "04:55",
-    "05:10", "05:25", "05:40", "05:55",
-    "06:10", "06:25", "06:40", "06:55",
+    "04:55", "05:10", "05:25", "05:40", "05:55",
+    "06:11", "06:25", "06:40", "06:55",
     "07:10", "07:27", "07:45",
-    "08:04", "08:23", "08:42",
+    "08:04", "08:22", "08:41",
     "09:01", "09:20", "09:40",
     "10:00", "10:20", "10:40",
     "11:00", "11:20", "11:43",
     "12:02", "12:21", "12:40", "12:59",
     "13:18", "13:37", "13:56",
-    "14:15", "14:34", "14:54",
-    "15:12", "15:29", "15:47",
+    "14:15", "14:34", "14:53",
+    "15:12", "15:28", "15:48",
     "16:07", "16:26", "16:45",
     "17:04", "17:23", "17:42",
-    "18:01", "18:19", "18:39", "18:57",
-    "19:18", "19:37", "19:56",
-    "20:14", "20:34", "20:53",
-    "21:12", "21:30", "21:49"
+    "18:01", "18:19", "18:38", "18:57",
+    "19:17", "19:36", "19:55",
+    "20:14", "20:33", "20:52",
+    "21:11", "21:30", "21:49"
 ]
 
 async def get_bus_190_kmou_main_next_departures(now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None) -> str:
@@ -2540,9 +2539,7 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
     import requests
     import xmltodict
 
-    lang = (lang or "ko").strip().lower()
-    if lang not in {"ko", "en"}:
-        lang = "ko"
+    # Always use Korean - lang parameter kept for compatibility but ignored
 
     api_key = (os.environ.get("YOUTH_CENTER_API_KEY") or "").strip()
     if not api_key:
