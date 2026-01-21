@@ -2106,7 +2106,7 @@ async def get_worknet_maritime_logistics_jobs(query: Optional[str] = None, limit
     return json.dumps({"status": "success", "query": q, "jobs": out}, ensure_ascii=False)
 
 _YOUTH_CENTER_JOB_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-_YOUTH_CENTER_JOB_CACHE_TTL_SECONDS = int(os.environ.get("ARA_YOUTH_CENTER_CACHE_TTL_SECONDS", "86400"))
+_YOUTH_CENTER_JOB_CACHE_TTL_SECONDS = int(os.environ.get("ARA_YOUTH_CENTER_CACHE_TTL_SECONDS", "3600"))  # 3600 seconds = 1 hour
 
 def _yc_cache_get(key: str) -> Optional[Dict[str, Any]]:
     item = _YOUTH_CENTER_JOB_CACHE.get(key)
@@ -2283,29 +2283,29 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
     api_url = "https://www.youthcenter.go.kr/opi/youthPolicyList.do"
     api_key = "ba0aad9d-c862-410c-90ac-130b556e370e"
     default_thumbnail = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop"
-    timeout_seconds = 3.5  # 3.5 seconds (Kakao limit is 5s, leave buffer)
+    timeout_seconds = 3.0  # 3.0 seconds (Kakao limit is 5s, leave buffer)
     
-    # Static High-Value Policy List (fallback for timeout/errors)
+    # KMOU Recommended Career List (Static Fallback)
     static_policies = [
         {
+            "policyName": "KMOU 취업지원센터",
+            "polyItcnCn": "한국해양대학교 취업상담 및 채용정보 제공 서비스",
+            "bizId": "",
+            "detail_url": "https://career.kmou.ac.kr",
+            "thumbnail": default_thumbnail
+        },
+        {
             "policyName": "청년내일채움공제",
-            "polyItcnCn": "중소기업 청년 근로자 임금 및 퇴직금 지원",
+            "polyItcnCn": "중소기업 청년 근로자 임금 및 퇴직금 지원 정책",
             "bizId": "R2023082110001",
             "detail_url": "https://www.youthcenter.go.kr/youngPlcyUnif/youngPlcyUnifDtl.do?bizId=R2023082110001",
             "thumbnail": default_thumbnail
         },
         {
-            "policyName": "청년취업지원금",
-            "polyItcnCn": "취업성공패키지 내 일자리 준비 활동 지원금 지급",
-            "bizId": "R2023011510001",
-            "detail_url": "https://www.youthcenter.go.kr/youngPlcyUnif/youngPlcyUnifDtl.do?bizId=R2023011510001",
-            "thumbnail": default_thumbnail
-        },
-        {
-            "policyName": "대한민국 청년허브",
-            "polyItcnCn": "청년 정책 통합 정보 제공 및 맞춤형 서비스",
-            "bizId": "R2022030110001",
-            "detail_url": "https://www.youthcenter.go.kr/youngPlcyUnif/youngPlcyUnifDtl.do?bizId=R2022030110001",
+            "policyName": "국가정책 지원",
+            "polyItcnCn": "청년취업지원금 및 청년정책 통합 정보 제공",
+            "bizId": "",
+            "detail_url": "https://www.youthcenter.go.kr",
             "thumbnail": default_thumbnail
         }
     ]
@@ -2314,6 +2314,13 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
     q = (keyword or "").strip()
     if not q or len(q) < 2:
         q = "취업"
+
+    # Step 1: Check global cache first (3600 seconds TTL)
+    cache_key = f"YOUTH_JOBS:{q}"
+    cached_result = _yc_cache_get(cache_key)
+    if cached_result is not None:
+        print(f"[ARA Debug] Youth Jobs Cache HIT for keyword: {q}")
+        return json.dumps(cached_result, ensure_ascii=False)
 
     try:
         # Prepare request parameters
@@ -2362,24 +2369,28 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
                 raise RuntimeError("HTML response received instead of XML")
 
     except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as e:
-        # Connection/Timeout errors - return static high-value policy list
-        print(f"[ARA Debug] Youth Jobs API Timeout/Error: {e} - Returning static policy list")
-        return json.dumps({
+        # Connection/Timeout errors - return KMOU recommended career list immediately
+        print(f"[ARA Debug] Youth Jobs API Timeout/Error: {e} - Returning KMOU static policy list")
+        payload = {
             "status": "success",
             "source": "static_fallback",
             "query": q,
-            "policies": static_policies
-        }, ensure_ascii=False)
+            "policies": static_policies,
+            "msg": "현재 실시간 정보가 지연되어 추천 정보를 대신 보여줄게!"
+        }
+        return json.dumps(payload, ensure_ascii=False)
 
     except Exception as e:
-        # Log for debugging but return static high-value policy list
-        print(f"[ARA Log] Youth Jobs API Error: {e} - Returning static policy list")
-        return json.dumps({
+        # Log for debugging but return KMOU recommended career list immediately
+        print(f"[ARA Log] Youth Jobs API Error: {e} - Returning KMOU static policy list")
+        payload = {
             "status": "success",
             "source": "static_fallback",
             "query": q,
-            "policies": static_policies
-        }, ensure_ascii=False)
+            "policies": static_policies,
+            "msg": "현재 실시간 정보가 지연되어 추천 정보를 대신 보여줄게!"
+        }
+        return json.dumps(payload, ensure_ascii=False)
 
     # Robust XML Parsing
     try:
@@ -2503,23 +2514,27 @@ async def get_youth_jobs(keyword: Optional[str] = None) -> str:
                 "policies": []
             }, ensure_ascii=False)
 
-        # Return success response
-        return json.dumps({
+        # Return success response and cache it
+        payload = {
             "status": "success",
             "source": "youth_center_policy",
             "query": q,
             "policies": items
-        }, ensure_ascii=False)
+        }
+        _yc_cache_set(cache_key, payload)  # Cache for 3600 seconds
+        return json.dumps(payload, ensure_ascii=False)
 
     except Exception as e:
-        # XML parsing errors - return static high-value policy list
-        print(f"[ARA Log] Youth Jobs XML Parsing Error: {e} - Returning static policy list")
-        return json.dumps({
+        # XML parsing errors - return KMOU recommended career list immediately
+        print(f"[ARA Log] Youth Jobs XML Parsing Error: {e} - Returning KMOU static policy list")
+        payload = {
             "status": "success",
             "source": "static_fallback",
             "query": q,
-            "policies": static_policies
-        }, ensure_ascii=False)
+            "policies": static_policies,
+            "msg": "현재 실시간 정보가 지연되어 추천 정보를 대신 보여줄게!"
+        }
+        return json.dumps(payload, ensure_ascii=False)
 
 async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lang: str = "ko") -> str:
     import requests
@@ -2541,7 +2556,7 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
     limit_n = max(5, min(int(limit or 10), 10))
     endpoint_https = "https://www.youthcenter.go.kr/opi/youthPolicyList.do"
     endpoint_http_8080 = "http://www.youthcenter.go.kr:8080/opi/youthPolicyList.do"
-    timeout_s = 3.5  # 3.5 seconds (Kakao limit is 5s, leave buffer)
+    timeout_s = 3.0  # 3.0 seconds (Kakao limit is 5s, leave buffer)
     default_thumbnail = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop"
     
     # Static High-Value Policy List (fallback for timeout/errors)

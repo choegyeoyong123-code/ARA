@@ -856,8 +856,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         first_line = f"🚀 이번 차: {t1}"
         if isinstance(r1, int):
             first_line += f" ({r1}분 전)"
-        second_line = f"🚍 다음 차: {t2}" if t2 else "🚍 다음 차: 막차입니다."
-        desc = "\n".join([first_line, second_line]).strip()
+        second_line = f"🚍 다음 차: {t2}" if t2 else ""
+        desc = "\n".join([x for x in [first_line, second_line] if x]).strip()
 
         return _kakao_basic_card(
             title="🚌 190번 버스 (구본관 출발)",
@@ -884,7 +884,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
     if msg.lower() in {"contact", "contacts"} or msg in {"캠퍼스 연락처", "연락처", "학교 연락처", "교내 연락처"}:
         from tools import get_campus_contacts
 
-        raw = get_campus_contacts(lang=lang)
+        raw = get_campus_contacts(lang="ko")
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
         cats = payload.get("categories") or []
         items = []
@@ -1153,6 +1153,10 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         cards = []
         default_thumbnail = "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop"
         
+        # Check if this is a static fallback (timeout/error case)
+        fallback_msg = payload.get("msg")
+        is_static_fallback = payload.get("source") == "static_fallback"
+        
         def _short40(s: str) -> str:
             t = (s or "").strip()
             t = re.sub(r"\s+", " ", t)
@@ -1172,13 +1176,16 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             # Korean description format
             desc = "\n".join([x for x in [_short40(itcn), prd] if x]).strip() or "정보를 확인 중입니다"
             if not cards:
-                desc = "지금 딱 맞는 정보를 찾았어! 네 꿈에 한 발짝 더 가까워지길 바랄게.\n\n" + desc
+                if is_static_fallback and fallback_msg:
+                    desc = f"{fallback_msg}\n\n" + desc
+                else:
+                    desc = "지금 딱 맞는 정보를 찾았어! 네 꿈에 한 발짝 더 가까워지길 바랄게.\n\n" + desc
             
             cards.append(
                 {
                     "title": title[:50],
                     "description": _normalize_desc_preserve_lines(desc),
-                    "thumbnail": {"imageUrl": default_thumbnail},
+                    "thumbnail": {"imageUrl": thumbnail_url},
                     "buttons": [{"action": "webLink", "label": "자세히", "webLinkUrl": link}],
                 }
             )
@@ -1273,8 +1280,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         first_line = f"🚀 이번 차: {t1}"
         if isinstance(r1, int):
             first_line += f" ({r1}분 전)"
-        second_line = f"🚍 다음 차: {t2}" if t2 else "🚍 다음 차: 막차입니다."
-        desc = "\n".join([first_line, second_line]).strip()
+        second_line = f"🚍 다음 차: {t2}" if t2 else ""
+        desc = "\n".join([x for x in [first_line, second_line] if x]).strip()
 
         return _kakao_basic_card(
             title="🚌 190번 버스 (구본관 출발)",
