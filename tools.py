@@ -2305,14 +2305,14 @@ async def get_youth_jobs(keyword: Optional[str] = None, category_code: Optional[
             "policyName": "KMOU 취업지원센터",
             "polyItcnCn": "한국해양대학교 취업상담 및 채용정보 제공 서비스",
             "bizId": "",
-            "detail_url": "https://career.kmou.ac.kr",
+            "detail_url": "https://www.kmou.ac.kr/myhaemi/na/ntt/selectNttList.do?mi=5386&bbsId=10002387",
             "thumbnail": default_thumbnail
         },
         {
             "policyName": "청년내일채움공제",
             "polyItcnCn": "중소기업 청년 근로자 임금 및 퇴직금 지원 정책",
-            "bizId": "R2023082110001",
-            "detail_url": "https://www.youthcenter.go.kr/youngPlcyUnif/youngPlcyUnifDtl.do?bizId=R2023082110001",
+            "bizId": "",
+            "detail_url": "https://www.sbcplan.or.kr/main.do?introGbn=01",
             "thumbnail": default_thumbnail
         },
         {
@@ -2606,7 +2606,7 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
         {
             "policyName": "청년내일채움공제",
             "polyItcnCn": "중소기업 청년 근로자 임금 및 퇴직금 지원",
-            "detail_url": "https://www.youthcenter.go.kr/youngPlcyUnif/youngPlcyUnifDtl.do?bizId=R2023082110001",
+            "detail_url": "https://www.sbcplan.or.kr/main.do?introGbn=01",
             "thumbnail": default_thumbnail
         },
         {
@@ -2624,7 +2624,7 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
         {
             "policyName": "KMOU 취업지원센터",
             "polyItcnCn": "한국해양대학교 취업상담 및 채용정보 제공",
-            "detail_url": "https://career.kmou.ac.kr",
+            "detail_url": "https://www.kmou.ac.kr/myhaemi/na/ntt/selectNttList.do?mi=5386&bbsId=10002387",
             "thumbnail": default_thumbnail
         },
         {

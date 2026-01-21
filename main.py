@@ -48,7 +48,9 @@ _KST = ZoneInfo("Asia/Seoul")
 # Function-Specific Thumbnail Mapping (Visual Differentiation)
 _THUMBNAIL_MAP = {
     "Bus_190": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop",
+    "Shuttle": "https://images.unsplash.com/photo-1570125909517-53cb21c89ff2?q=80&w=600&auto=format&fit=crop",
     "Cafeteria": "https://images.unsplash.com/photo-1547573854-74d2a71d0826?q=80&w=600&auto=format&fit=crop",
+    "Food_Restaurant": "https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=600&auto=format&fit=crop",
     "Career_Policy": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop",
     "Weather": "https://images.unsplash.com/photo-1592210454359-9043f067919b?q=80&w=600&auto=format&fit=crop",
     "Default": "https://images.unsplash.com/photo-1516116216624-53e697fedbea?q=80&w=600&auto=format&fit=crop"
@@ -855,7 +857,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         if not isinstance(payload, dict):
             payload = {}
 
-        thumb = {"imageUrl": "https://images.unsplash.com/photo-1570125909232-eb2b9b1de9ea?q=80&w=600&auto=format&fit=crop"}
         timetable_url = "https://www.kmou.ac.kr/kmou/cm/cntnts/cntntsView.do?mi=2036&cntntsId=356"
         buttons = [{"action": "webLink", "label": "전체 시간표 확인", "webLinkUrl": timetable_url}]
 
@@ -863,8 +864,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             return _kakao_basic_card(
                 title="🚌 190번 버스 (구본관 출발)",
                 description=_normalize_desc_preserve_lines("오늘 190번 운행은 종료되었어 (막차 21:49). 내일 첫차는 04:55야! 🌙"),
-                thumbnail=thumb,
                 buttons=buttons,
+                thumbnail_type="Bus_190",
             )
 
         nxt = payload.get("next") or {}
@@ -882,8 +883,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         return _kakao_basic_card(
             title="🚌 190번 버스 (구본관 출발)",
             description=_normalize_desc_preserve_lines(desc),
-            thumbnail=thumb,
             buttons=buttons,
+            thumbnail_type="Bus_190",
         )
 
     # 인터랙션 로그(프로토타입): 자주 묻는 질문/의도 집계를 위해 저장(응답에는 절대 노출하지 않음)
@@ -1273,6 +1274,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": "카페/커피", "messageText": "카페"},
                     {"action": "message", "label": "맛집 제보하기", "messageText": "맛집 제보하기"},
                 ],
+                thumbnail_type="Food_Restaurant",
             )
         r = payload.get("restaurant") or {}
         name = (r.get("name") or "맛집").strip()
@@ -1288,6 +1290,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 {"action": "message", "label": "다른 맛집 랜덤", "messageText": "맛집"},
                 {"action": "message", "label": "카페/커피", "messageText": "카페"},
             ],
+            thumbnail_type="Food_Restaurant",
         )
 
     # 맛집 제보 플로우(권유형 UX)
@@ -1319,7 +1322,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         if not isinstance(payload, dict):
             payload = {}
 
-        thumb = {"imageUrl": "https://images.unsplash.com/photo-1570125909232-eb2b9b1de9ea?q=80&w=600&auto=format&fit=crop"}
         timetable_url = "https://www.kmou.ac.kr/kmou/cm/cntnts/cntntsView.do?mi=2036&cntntsId=356"
         buttons = [{"action": "webLink", "label": "전체 시간표 확인", "webLinkUrl": timetable_url}]
 
@@ -1327,8 +1329,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             return _kakao_basic_card(
                 title="🚌 190번 버스 (구본관 출발)",
                 description=_normalize_desc_preserve_lines("오늘 190번 운행은 종료되었어 (막차 21:49). 내일 첫차는 04:55야! 🌙"),
-                thumbnail=thumb,
                 buttons=buttons,
+                thumbnail_type="Bus_190",
             )
 
         nxt = payload.get("next") or {}
@@ -1346,8 +1348,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
         return _kakao_basic_card(
             title="🚌 190번 버스 (구본관 출발)",
             description=_normalize_desc_preserve_lines(desc),
-            thumbnail=thumb,
             buttons=buttons,
+            thumbnail_type="Bus_190",
         )
 
     # Home
@@ -1405,6 +1407,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 title="셔틀버스",
                 description=_normalize_desc(payload.get("msg") or "셔틀 운행 정보를 확인할 수 없습니다."),
                 buttons=[{"action": "message", "label": "노선 안내", "messageText": "셔틀 노선 안내"}],
+                thumbnail_type="Shuttle",
             )
         return _kakao_basic_card(
             title="셔틀버스",
@@ -1413,6 +1416,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 {"action": "message", "label": "노선 안내", "messageText": "셔틀 노선 안내"},
                 {"action": "message", "label": "다시 조회", "messageText": "셔틀 시간"},
             ],
+            thumbnail_type="Shuttle",
         )
 
     return None
