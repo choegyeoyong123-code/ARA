@@ -68,8 +68,18 @@ def _abs_url(path: str) -> str:
     return p
 
 # Ocean-themed Visual Assets (ARA Identity)
-IMG_KMOU_HOME = "https://images.unsplash.com/photo-1533596572767-021096785655?q=80&w=600&auto=format&fit=crop"  # 윤슬
-IMG_DEFAULT_WAVE = "https://images.unsplash.com/photo-1505228395891-9a51e7e86bf6?q=80&w=600&auto=format&fit=crop"  # 파도
+_IMG_CUTE_BASE = "https://uwx.github.io/fluentui-twemoji-3d/export/3D_png/72x72/"
+
+# 귀여운(3D 이모지) 카드 썸네일 — 버튼별 시각 아이덴티티
+IMG_KMOU_HOME = _IMG_CUTE_BASE + "1f3eb.png"        # 🏫 홈피(학교)
+IMG_DEFAULT_WAVE = _IMG_CUTE_BASE + "1f30a.png"     # 🌊 기본(파도)
+IMG_CONTACT = _IMG_CUTE_BASE + "1f4de.png"          # 📞 연락처
+IMG_CAFETERIA = _IMG_CUTE_BASE + "1f371.png"        # 🍱 학식(도시락)
+IMG_FOOD = _IMG_CUTE_BASE + "1f35c.png"             # 🍜 맛집(라멘)
+IMG_CAREER = _IMG_CUTE_BASE + "1f4bc.png"           # 💼 취업/정책(서류가방)
+IMG_WEATHER = _IMG_CUTE_BASE + "1f324.png"          # 🌤️ 날씨
+IMG_BUS_190_FALLBACK = _IMG_CUTE_BASE + "1f68c.png" # 🚌 190(버스)
+IMG_SHUTTLE_FALLBACK = _IMG_CUTE_BASE + "1f690.png" # 🚐 셔틀(미니버스)
 
 def _img_url_or(fallback: str, *candidates: str) -> str:
     """
@@ -90,17 +100,19 @@ IMG_BUS_190_NEW = _abs_url(os.environ.get("IMG_BUS_190_NEW") or "/static/bus190_
 # Function-Specific Thumbnail Mapping (Visual Differentiation)
 _THUMBNAIL_MAP = {
     "Bus_190": _img_url_or(
-        "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop",
+        IMG_BUS_190_FALLBACK,
         IMG_BUS_190_NEW,
     ),
     "Shuttle": _img_url_or(
-        "https://images.unsplash.com/photo-1570125909517-53cb21c89ff2?q=80&w=600&auto=format&fit=crop",
+        IMG_SHUTTLE_FALLBACK,
         IMG_SHUTTLE_NEW,
     ),
-    "Cafeteria": "https://images.unsplash.com/photo-1547573854-74d2a71d0826?q=80&w=600&auto=format&fit=crop",
-    "Food_Restaurant": "https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=600&auto=format&fit=crop",
-    "Career_Policy": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop",
-    "Weather": "https://images.unsplash.com/photo-1592210454359-9043f067919b?q=80&w=600&auto=format&fit=crop",
+    "Cafeteria": IMG_CAFETERIA,
+    "Food_Restaurant": IMG_FOOD,
+    "Career_Policy": IMG_CAREER,
+    "Weather": IMG_WEATHER,
+    "Contact": IMG_CONTACT,
+    "Home": IMG_KMOU_HOME,
     "Default": IMG_DEFAULT_WAVE,
 }
 
@@ -924,11 +936,23 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     "messageText": f"연락처 {cat}",
                 }
             )
-        return _kakao_list_card(
-            header_title="📞 캠퍼스 연락처",
-            items=items or [{"title": "연락처", "description": "표시할 항목이 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
-            buttons=[{"action": "message", "label": "KMOU 홈페이지", "messageText": "KMOU 홈페이지"}],
-        )
+        # listCard는 썸네일이 없으므로, 상단에 귀여운 썸네일 basicCard를 함께 출력(버튼 UX 유지)
+        intro = {
+            "basicCard": {
+                "title": "📞 캠퍼스 연락처",
+                "description": "원하는 분류를 선택하면 부서별 연락처를 보여줄게!",
+                "thumbnail": {"imageUrl": _THUMBNAIL_MAP.get("Contact", IMG_DEFAULT_WAVE)},
+                "buttons": [{"action": "message", "label": "KMOU 홈페이지", "messageText": "KMOU 홈페이지"}],
+            }
+        }
+        list_card = {
+            "listCard": {
+                "header": {"title": "📞 캠퍼스 연락처"},
+                "items": items or [{"title": "연락처", "description": "표시할 항목이 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
+                "buttons": [{"action": "message", "label": "KMOU 홈페이지", "messageText": "KMOU 홈페이지"}],
+            }
+        }
+        return _kakao_response([intro, list_card])
 
     m_contact_cat = re.match(r"^(연락처|contact)\s+(?P<cat>[A-Za-z_]+)\s*$", msg, flags=re.IGNORECASE)
     if m_contact_cat:
@@ -956,11 +980,22 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     "messageText": f"전화 {office}",
                 }
             )
-        return _kakao_list_card(
-            header_title=f"📞 {payload.get('category_label') or cat}",
-            items=items or [{"title": "연락처", "description": "표시할 부서가 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
-            buttons=[{"action": "message", "label": "다른 분류", "messageText": "캠퍼스 연락처"}],
-        )
+        intro = {
+            "basicCard": {
+                "title": f"📞 {payload.get('category_label') or cat}",
+                "description": "부서를 선택하면 바로 전화할 수 있어.",
+                "thumbnail": {"imageUrl": _THUMBNAIL_MAP.get("Contact", IMG_DEFAULT_WAVE)},
+                "buttons": [{"action": "message", "label": "다른 분류", "messageText": "캠퍼스 연락처"}],
+            }
+        }
+        list_card = {
+            "listCard": {
+                "header": {"title": f"📞 {payload.get('category_label') or cat}"},
+                "items": items or [{"title": "연락처", "description": "표시할 부서가 없습니다.", "action": "message", "messageText": "캠퍼스 연락처"}],
+                "buttons": [{"action": "message", "label": "다른 분류", "messageText": "캠퍼스 연락처"}],
+            }
+        }
+        return _kakao_response([intro, list_card])
 
     m_contact_office = re.match(r"^(전화|call)\s+(?P<office>[A-Za-z_]+)\s*$", msg, flags=re.IGNORECASE)
     if m_contact_office:
