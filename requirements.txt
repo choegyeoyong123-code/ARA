@@ -1,4 +1,4 @@
-ï»¿aiohappyeyeballs==2.6.1
+ÿþaiohappyeyeballs==2.6.1
 aiohttp==3.13.3
 aiosignal==1.4.0
 altair==6.0.0

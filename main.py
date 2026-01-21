@@ -184,35 +184,30 @@ def _nav_quick_replies(lang: str) -> list[dict]:
     if lang == "en":
         base = [
             {"label": "🕒 190 Departs (KMOU Main)", "action": "message", "messageText": "190 해양대구본관 출발"},
-            {"label": "🌤️ Weather", "action": "message", "messageText": "weather"},
-            {"label": "🚐 Shuttle", "action": "message", "messageText": "shuttle"},
             {"label": "🍱 Cafeteria", "action": "message", "messageText": "cafeteria menu"},
-            {"label": "🏫 Home", "action": "message", "messageText": "home"},
-            {"label": "📞 Contact", "action": "message", "messageText": "contact"},
-            {"label": "🍚 Food", "action": "message", "messageText": "food"},
-            {"label": "🏥 Hospital", "action": "message", "messageText": "hospital"},
+            {"label": "🚐 Shuttle", "action": "message", "messageText": "shuttle"},
+            {"label": "🌤️ Weather", "action": "message", "messageText": "weather"},
+            {"label": "🍚 Restaurants", "action": "message", "messageText": "food"},
             {"label": "💼 Jobs/Policy", "action": "message", "messageText": "취업/정책"},
+            {"label": "🏥 Medical", "action": "message", "messageText": "hospital"},
+            {"label": "📞 Contact", "action": "message", "messageText": "contact"},
+            {"label": "🏫 Home", "action": "message", "messageText": "home"},
+            {"label": "한국어 모드", "action": "message", "messageText": "__toggle_lang__"},
         ]
-    else:
-        base = [
-            {"label": "🕒 190 출발(구본관)", "action": "message", "messageText": "190 해양대구본관 출발"},
-            {"label": "🌤️ 해양대 날씨", "action": "message", "messageText": "영도 날씨"},
-            {"label": "🚐 셔틀버스", "action": "message", "messageText": "셔틀 시간"},
-            {"label": "🍱 학식", "action": "message", "messageText": "학식"},
-            {"label": "🏫 학교 홈피", "action": "message", "messageText": "KMOU 홈페이지"},
-            {"label": "📞 캠퍼스 연락처", "action": "message", "messageText": "캠퍼스 연락처"},
-            {"label": "🍚 맛집 추천", "action": "message", "messageText": "맛집"},
-            {"label": "🏥 약국/병원", "action": "message", "messageText": "약국/병원"},
-            {"label": "💼 취업/정책", "action": "message", "messageText": "취업/정책"},
-        ]
-    # Toggle 버튼은 항상 마지막에 추가
-    base.append(
-        {
-            "label": ("🌐 한국어 모드" if lang == "en" else "🌐 English Mode"),
-            "action": "message",
-            "messageText": "__toggle_lang__",
-        }
-    )
+        return base
+
+    base = [
+        {"label": "190번 출발 (구본관)", "action": "message", "messageText": "190 해양대구본관 출발"},
+        {"label": "학식", "action": "message", "messageText": "학식"},
+        {"label": "셔틀버스", "action": "message", "messageText": "셔틀 시간"},
+        {"label": "날씨", "action": "message", "messageText": "영도 날씨"},
+        {"label": "맛집 추천", "action": "message", "messageText": "맛집"},
+        {"label": "취업/정책", "action": "message", "messageText": "취업/정책"},
+        {"label": "병원 / 약국", "action": "message", "messageText": "약국/병원"},
+        {"label": "캠퍼스 연락처", "action": "message", "messageText": "캠퍼스 연락처"},
+        {"label": "학교 홈피", "action": "message", "messageText": "KMOU 홈페이지"},
+        {"label": "English Mode", "action": "message", "messageText": "__toggle_lang__"},
+    ]
     return base
 
 @app.on_event("startup")
@@ -1073,7 +1068,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": ("취소" if lang != "en" else "Cancel"), "messageText": "약국/병원"},
                     {"action": "message", "label": ("취업/정책" if lang != "en" else "Jobs/Policy"), "messageText": "취업/정책"},
                 ],
-                quick_replies=_qr_hospital_dept(lang),
             )
         # 병원: 부산광역시 영도구 범위로 확장(반경 20km) + 영도구 한정(주소 필터 폴백 금지)
         raw2 = await get_medical_places(kind=f"{dept} 병원", radius_m=20000, lang=lang, strict_yeongdo=True)
@@ -1086,7 +1080,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": ("다시 시도" if lang != "en" else "Retry"), "messageText": "병원 찾기"},
                     {"action": "message", "label": ("약국/병원" if lang != "en" else "Medical"), "messageText": "약국/병원"},
                 ],
-                quick_replies=_qr_medical(lang),
             )
         places = payload2.get("places") or []
         items = []
@@ -1107,7 +1100,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": ("약국/병원" if lang != "en" else "Medical"), "messageText": "약국/병원"},
                     {"action": "message", "label": ("취업/정책" if lang != "en" else "Jobs/Policy"), "messageText": "취업/정책"},
                 ],
-                quick_replies=_qr_medical(lang),
             )
         return _kakao_list_card(
             header_title=("영도구 병원" if lang != "en" else "Hospitals in Yeongdo"),
@@ -1117,7 +1109,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 {"action": "message", "label": ("홈" if lang != "en" else "Home"), "messageText": ("KMOU 홈페이지" if lang != "en" else "home")},
                 {"action": "message", "label": ("취업/정책" if lang != "en" else "Jobs/Policy"), "messageText": "취업/정책"},
             ],
-            quick_replies=_qr_medical(lang),
         )
 
     # Cafeteria menu: 크롤링 폐기 → KMOU Coop 사이트로 바로 연결
@@ -1160,7 +1151,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 title=("Career" if lang == "en" else "커리어 가속"),
                 description=_normalize_desc("워워, 천천히 물어봐도 다 답해줄 수 있어! 조금만 숨 돌리고 오자."),
                 buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
-                quick_replies=_qr_career(lang),
             )
 
         intent, score, kw = _career_best_intent(msg)
@@ -1173,7 +1163,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": ("Office/Tax" if lang == "en" else "사무/세무"), "messageText": "세무 채용"},
                     {"action": "message", "label": ("Youth Policy" if lang == "en" else "청년정책"), "messageText": "청년지원 정책"},
                 ],
-                quick_replies=_qr_career(lang),
             )
 
         keyword = (kw or "").strip() or _extract_worknet_keyword(msg)
@@ -1191,14 +1180,12 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 title=("Career" if lang == "en" else "커리어 가속"),
                 description=_normalize_desc(payload.get("msg") or ("현재 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch right now.")),
                 buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
-                quick_replies=_qr_career(lang),
             )
         if payload.get("status") == "empty":
             return _kakao_basic_card(
                 title=("Career" if lang == "en" else "커리어 가속"),
                 description=_normalize_desc(payload.get("msg") or ("현재 조건에 맞는 프로그램이 없습니다." if lang != "en" else "No matching programs found.")),
                 buttons=[{"action": "message", "label": ("다른 키워드" if lang != "en" else "Try another"), "messageText": "해운 채용"}],
-                quick_replies=_qr_career(lang),
             )
 
         jobs = (payload.get("jobs") or [])[:5]
@@ -1225,9 +1212,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 title=("Career" if lang == "en" else "커리어 가속"),
                 description=_normalize_desc("정보를 확인 중입니다"),
                 buttons=[{"action": "message", "label": ("Retry" if lang == "en" else "다시 조회"), "messageText": msg}],
-                quick_replies=_qr_career(lang),
             )
-        return _kakao_carousel_basic_cards(cards, quick_replies=_qr_career(lang))
+        return _kakao_carousel_basic_cards(cards)
 
     if ("맛집" in msg) or ("식당" in msg) or ("restaurants" in msg.lower()) or ("food" in msg.lower()) or ("restaurant" in msg.lower()):
         from tools import get_random_yeongdo_restaurant
@@ -1303,7 +1289,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": ("취업/정책" if lang != "en" else "Jobs/Policy"), "messageText": "취업/정책"},
                     {"action": "message", "label": ("홈" if lang != "en" else "Home"), "messageText": ("KMOU 홈페이지" if lang != "en" else "home")},
                 ],
-                quick_replies=_qr_medical(lang),
             )
         items = []
         for p in (payload.get("places") or [])[:5]:
@@ -1320,7 +1305,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 {"action": "message", "label": ("홈" if lang != "en" else "Home"), "messageText": ("KMOU 홈페이지" if lang != "en" else "home")},
                 {"action": "message", "label": ("취업/정책" if lang != "en" else "Jobs/Policy"), "messageText": "취업/정책"},
             ],
-            quick_replies=_qr_medical(lang),
         )
 
     # Pharmacy/Hospital(개편)
@@ -1339,7 +1323,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                         {"action": "message", "label": ("Home" if lang == "en" else "홈"), "messageText": ("home" if lang == "en" else "KMOU 홈페이지")},
                         {"action": "message", "label": ("Jobs/Policy" if lang == "en" else "취업/정책"), "messageText": "취업/정책"},
                     ],
-                    quick_replies=_qr_medical(lang),
                 )
             rows = (p.get("pharmacies") or [])[:5]
             lines = []
@@ -1369,7 +1352,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": ("Jobs/Policy" if lang == "en" else "취업/정책"), "messageText": "취업/정책"},
                     {"action": "message", "label": ("Home" if lang == "en" else "홈"), "messageText": ("home" if lang == "en" else "KMOU 홈페이지")},
                 ],
-                quick_replies=_qr_medical(lang),
             )
 
         if msg == "병원 찾기" or ("hospital" in msg.lower()) or (("병원" in msg) and ("약국" not in msg)):
@@ -1382,7 +1364,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     {"action": "message", "label": ("Home" if lang == "en" else "홈"), "messageText": ("home" if lang == "en" else "KMOU 홈페이지")},
                     {"action": "message", "label": ("Jobs/Policy" if lang == "en" else "취업/정책"), "messageText": "취업/정책"},
                 ],
-                quick_replies=_qr_hospital_dept(lang),
             )
 
         # 3) 약국/병원 메인 메뉴(버튼 통합)
@@ -1396,7 +1377,6 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 {"action": "message", "label": ("Jobs/Policy" if lang == "en" else "취업/정책"), "messageText": "취업/정책"},
                 {"action": "message", "label": ("Home" if lang == "en" else "홈"), "messageText": ("home" if lang == "en" else "KMOU 홈페이지")},
             ],
-            quick_replies=_qr_medical(lang),
         )
 
     if _is_bus_query(msg):
@@ -1441,9 +1421,11 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
     if ("홈페이지" in msg) or ("kmou" in msg.lower()) or ("학교 홈페이지" in msg) or ("KMOU 홈페이지" in msg) or (msg.lower().strip() in {"home", "homepage"}):
         return _kakao_basic_card(
             title=("KMOU Homepage" if lang == "en" else "한국해양대학교(KMOU) 홈페이지"),
-            description=("You can check official notices and academic information on the website."
-                         if lang == "en"
-                         else "공식 홈페이지에서 공지/학사일정/학과 정보를 확인할 수 있습니다."),
+            description=(
+                "필요한 걸 바로 찾을 수 있게 메뉴를 싹 정리해봤어. 확인해봐!\n\nYou can check official notices and academic information on the website."
+                if lang == "en"
+                else "필요한 걸 바로 찾을 수 있게 메뉴를 싹 정리해봤어. 확인해봐!\n\n공식 홈페이지에서 공지/학사일정/학과 정보를 확인할 수 있습니다."
+            ),
             buttons=[{"action": "webLink", "label": ("Open website" if lang == "en" else "KMOU 홈페이지 열기"), "webLinkUrl": "https://www.kmou.ac.kr"}],
         )
 
