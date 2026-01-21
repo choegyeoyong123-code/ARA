@@ -50,10 +50,32 @@ _KST = ZoneInfo("Asia/Seoul")
 IMG_KMOU_HOME = "https://images.unsplash.com/photo-1533596572767-021096785655?q=80&w=600&auto=format&fit=crop"  # 윤슬
 IMG_DEFAULT_WAVE = "https://images.unsplash.com/photo-1505228395891-9a51e7e86bf6?q=80&w=600&auto=format&fit=crop"  # 파도
 
+def _img_url_or(fallback: str, *candidates: str) -> str:
+    """
+    KakaoTalk 썸네일은 외부 접근 가능한 URL이 필요합니다.
+    - 후보 중 http(s)로 시작하는 값이 있으면 그 값을 사용
+    - 없으면 fallback 사용 (placeholder/빈값으로 인한 깨짐 방지)
+    """
+    for u in candidates:
+        s = (u or "").strip()
+        if s.startswith("http://") or s.startswith("https://"):
+            return s
+    return fallback
+
+# User-provided anime-style illustrations (override via env or edit constants)
+IMG_SHUTTLE_NEW = os.environ.get("IMG_SHUTTLE_NEW") or "URL_FOR_IMAGE_1"
+IMG_BUS_190_NEW = os.environ.get("IMG_BUS_190_NEW") or "URL_FOR_IMAGE_2"
+
 # Function-Specific Thumbnail Mapping (Visual Differentiation)
 _THUMBNAIL_MAP = {
-    "Bus_190": "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop",
-    "Shuttle": "https://images.unsplash.com/photo-1570125909517-53cb21c89ff2?q=80&w=600&auto=format&fit=crop",
+    "Bus_190": _img_url_or(
+        "https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?q=80&w=600&auto=format&fit=crop",
+        IMG_BUS_190_NEW,
+    ),
+    "Shuttle": _img_url_or(
+        "https://images.unsplash.com/photo-1570125909517-53cb21c89ff2?q=80&w=600&auto=format&fit=crop",
+        IMG_SHUTTLE_NEW,
+    ),
     "Cafeteria": "https://images.unsplash.com/photo-1547573854-74d2a71d0826?q=80&w=600&auto=format&fit=crop",
     "Food_Restaurant": "https://images.unsplash.com/photo-1504674900247-0877df9cc836?q=80&w=600&auto=format&fit=crop",
     "Career_Policy": "https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=600&auto=format&fit=crop",
@@ -1326,12 +1348,14 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
     if "셔틀 노선" in msg:
         raw = await get_shuttle_next_buses(limit=1, lang="ko")
         payload = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        shuttle_thumb = {"imageUrl": _THUMBNAIL_MAP.get("Shuttle", IMG_DEFAULT_WAVE)}
         return _kakao_response(
             [
                 {
                     "basicCard": {
                         "title": "셔틀 기본 운행 노선",
                         "description": _normalize_desc(payload.get("route_base") or ""),
+                        "thumbnail": shuttle_thumb,
                         "buttons": [{"action": "message", "label": "셔틀 시간", "messageText": "셔틀 시간"}],
                     }
                 },
@@ -1339,6 +1363,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     "basicCard": {
                         "title": "동삼시장 방면 노선(해당 시각만)",
                         "description": _normalize_desc(payload.get("route_market") or ""),
+                        "thumbnail": shuttle_thumb,
                         "buttons": [{"action": "message", "label": "셔틀 시간", "messageText": "셔틀 시간"}],
                     }
                 },
@@ -1346,6 +1371,7 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                     "basicCard": {
                         "title": "운행 안내",
                         "description": _normalize_desc(payload.get("notice") or "주말 및 법정 공휴일 운행 없음"),
+                        "thumbnail": shuttle_thumb,
                         "buttons": [{"action": "message", "label": "KMOU 홈페이지", "messageText": "KMOU 홈페이지"}],
                     }
                 },
