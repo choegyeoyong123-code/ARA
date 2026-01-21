@@ -2001,7 +2001,6 @@ async def get_random_yeongdo_restaurant(limit_pool: int = 15) -> str:
         return json.dumps({"status": "empty", "msg": "정보 없음"}, ensure_ascii=False)
 
 async def get_worknet_maritime_logistics_jobs(query: Optional[str] = None, limit: int = 5, lang: str = "ko") -> str:
-    import requests
     import xml.etree.ElementTree as ET
     from urllib.parse import quote
 
@@ -2032,13 +2031,11 @@ async def get_worknet_maritime_logistics_jobs(query: Optional[str] = None, limit
         "keyword": q,
     }
 
-    def _fetch_xml() -> str:
-        r = requests.get(url, params=params, headers=HEADERS, timeout=timeout_s, verify=HTTPX_VERIFY)
-        r.raise_for_status()
-        return r.text or ""
-
     try:
-        xml_text = await asyncio.to_thread(_fetch_xml)
+        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS, timeout=timeout_s) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            xml_text = response.text or ""
     except Exception:
         return json.dumps(
             {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch job listings right now.")},
@@ -2106,8 +2103,10 @@ async def get_worknet_maritime_logistics_jobs(query: Optional[str] = None, limit
 
 _YOUTH_CENTER_JOB_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 _YOUTH_CENTER_JOB_CACHE_TTL_SECONDS = int(os.environ.get("ARA_YOUTH_CENTER_CACHE_TTL_SECONDS", "3600"))  # 3600 seconds = 1 hour
+_yc_cache_lock = asyncio.Lock()
 
-def _yc_cache_get(key: str) -> Optional[Dict[str, Any]]:
+async def _yc_cache_get(key: str) -> Optional[Dict[str, Any]]:
+    async with _yc_cache_lock:
     item = _YOUTH_CENTER_JOB_CACHE.get(key)
     if not item:
         return None
@@ -2117,7 +2116,8 @@ def _yc_cache_get(key: str) -> Optional[Dict[str, Any]]:
         return None
     return val
 
-def _yc_cache_set(key: str, value: Dict[str, Any]) -> None:
+async def _yc_cache_set(key: str, value: Dict[str, Any]) -> None:
+    async with _yc_cache_lock:
     _YOUTH_CENTER_JOB_CACHE[key] = (time.time(), value)
 
 async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") -> str:
@@ -2126,7 +2126,6 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
     - 응답(XML) → dict(JSON) 변환 후, 필요한 필드만 추출
     - 캐시: 24h(in-memory)
     """
-    import requests
     import xmltodict
 
     lang = (lang or "ko").strip().lower()
@@ -2149,14 +2148,9 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
     num_rows = str(max(10, min(limit_n * 6, 60)))
 
     cache_key = f"YOUTH24:{q}:{limit_n}"
-    cached = _yc_cache_get(cache_key)
+    cached = await _yc_cache_get(cache_key)
     if cached is not None:
         return json.dumps(cached, ensure_ascii=False)
-
-    def _fetch_xml(params: Dict[str, Any]) -> str:
-        r = requests.get(endpoint, params=params, headers=HEADERS, timeout=timeout_s, verify=HTTPX_VERIFY)
-        r.raise_for_status()
-        return r.text or ""
 
     params_candidates = [
         {"apiKey": api_key, "keyword": q, "pageNo": "1", "numOfRows": num_rows},
@@ -2165,9 +2159,12 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
     ]
 
     xml_text = ""
+    async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS, timeout=timeout_s) as client:
     for p in params_candidates:
         try:
-            xml_text = await asyncio.to_thread(_fetch_xml, p)
+                response = await client.get(endpoint, params=p)
+                response.raise_for_status()
+                xml_text = response.text or ""
             if xml_text:
                 break
         except Exception:
@@ -2175,14 +2172,14 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
 
     if not xml_text:
         payload = {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch jobs right now.")}
-        _yc_cache_set(cache_key, payload)
+        await _yc_cache_set(cache_key, payload)
         return json.dumps(payload, ensure_ascii=False)
 
     try:
         parsed = xmltodict.parse(xml_text)
     except Exception:
         payload = {"status": "error", "msg": ("현재 채용 정보를 불러올 수 없습니다." if lang != "en" else "Unable to fetch jobs right now.")}
-        _yc_cache_set(cache_key, payload)
+        await _yc_cache_set(cache_key, payload)
         return json.dumps(payload, ensure_ascii=False)
 
     def _iter_dicts(node: Any) -> List[Dict[str, Any]]:
@@ -2222,7 +2219,7 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
     items = _extract_items(parsed) or []
     if not items:
         payload = {"status": "empty", "msg": ("현재 진행 중인 채용 정보가 없습니다." if lang != "en" else "No jobs found."), "query": q, "jobs": []}
-        _yc_cache_set(cache_key, payload)
+        await _yc_cache_set(cache_key, payload)
         return json.dumps(payload, ensure_ascii=False)
 
     def _pick(it: Dict[str, Any], keys: List[str]) -> str:
@@ -2262,11 +2259,11 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
 
     if not out:
         payload = {"status": "empty", "msg": ("현재 진행 중인 채용 정보가 없습니다." if lang != "en" else "No jobs found."), "query": q, "jobs": []}
-        _yc_cache_set(cache_key, payload)
+        await _yc_cache_set(cache_key, payload)
         return json.dumps(payload, ensure_ascii=False)
 
     payload = {"status": "success", "source": "youth_center_work24", "query": q, "jobs": out}
-    _yc_cache_set(cache_key, payload)
+    await _yc_cache_set(cache_key, payload)
     return json.dumps(payload, ensure_ascii=False)
 
 async def get_youth_jobs(keyword: Optional[str] = None, category_code: Optional[str] = None) -> str:
@@ -2348,7 +2345,7 @@ async def get_youth_jobs(keyword: Optional[str] = None, category_code: Optional[
 
     # Step 1: Check global cache first (3600 seconds TTL) - include category code in cache key
     cache_key = f"YOUTH_JOBS:{q}:{poly_biz_tycd}"
-    cached_result = _yc_cache_get(cache_key)
+    cached_result = await _yc_cache_get(cache_key)
     if cached_result is not None:
         print(f"[ARA Debug] Youth Jobs Cache HIT for keyword: {q}, category: {poly_biz_tycd}")
         return json.dumps(cached_result, ensure_ascii=False)
@@ -2565,7 +2562,7 @@ async def get_youth_jobs(keyword: Optional[str] = None, category_code: Optional[
             "query": q,
             "policies": items
         }
-        _yc_cache_set(cache_key, payload)  # Cache for 3600 seconds
+        await _yc_cache_set(cache_key, payload)  # Cache for 3600 seconds
         return json.dumps(payload, ensure_ascii=False)
 
     except Exception as e:
@@ -2578,10 +2575,9 @@ async def get_youth_jobs(keyword: Optional[str] = None, category_code: Optional[
             "policies": static_policies,
             "msg": "현재 실시간 정보가 지연되어 추천 정보를 대신 보여줄게!"
         }
-        return json.dumps(payload, ensure_ascii=False)
+    return json.dumps(payload, ensure_ascii=False)
 
 async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lang: str = "ko") -> str:
-    import requests
     import xmltodict
 
     # Always use Korean - lang parameter kept for compatibility but ignored
@@ -2636,25 +2632,24 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
     ]
 
     cache_key = f"YOUTH_POLICY:{q}:{limit_n}:{lang}"
-    cached = _yc_cache_get(cache_key)
+    cached = await _yc_cache_get(cache_key)
     if cached is not None:
         return json.dumps(cached, ensure_ascii=False)
 
-    def _fetch(params: Dict[str, Any]) -> str:
+    async def _fetch(params: Dict[str, Any]) -> str:
         headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/xml,text/xml,*/*"}
 
         last_err: Exception | None = None
+        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers, timeout=timeout_s) as client:
         for url in [endpoint_https, endpoint_http_8080]:
             try:
                 allow_redirects = False if url == endpoint_https else True
-                r = requests.get(url, params=params, headers=headers, timeout=timeout_s, verify=HTTPX_VERIFY, allow_redirects=allow_redirects)
-                if (r.status_code in (301, 302, 303, 307, 308)) and url == endpoint_https:
-                    raise RuntimeError(f"Redirected: {r.headers.get('location')}")
-                if r.status_code != 200:
-                    raise RuntimeError(f"HTTP {r.status_code}")
-                if not r.encoding:
-                    r.encoding = r.apparent_encoding or "utf-8"
-                text = r.text or ""
+                    response = await client.get(url, params=params, follow_redirects=allow_redirects)
+                    if (response.status_code in (301, 302, 303, 307, 308)) and url == endpoint_https:
+                        raise RuntimeError(f"Redirected: {response.headers.get('location')}")
+                    if response.status_code != 200:
+                        raise RuntimeError(f"HTTP {response.status_code}")
+                    text = response.text or ""
                 if text.lstrip().lower().startswith("<html"):
                     raise RuntimeError("HTML response")
                 return text
@@ -2732,11 +2727,11 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
                 break
         return out
 
-    def _request_once(query_text: str | None) -> List[Dict[str, Any]]:
+    async def _request_once(query_text: str | None) -> List[Dict[str, Any]]:
         params = {"authKey": api_key, "display": "10", "pageIndex": "1"}
         if query_text:
             params["query"] = query_text
-        xml_text = _fetch(params)
+        xml_text = await _fetch(params)
         items = _parse_items(xml_text)
         return _normalize(items)
 
@@ -2744,12 +2739,12 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
         items = []
         if q:
             try:
-                items = await asyncio.to_thread(_request_once, q)
+                items = await _request_once(q)
             except Exception:
                 items = []
         if len(items) < 5:
             try:
-                more = await asyncio.to_thread(_request_once, None)
+                more = await _request_once(None)
                 merged = { (it.get("policyName","") + "|" + it.get("detail_url","")).strip(): it for it in items if isinstance(it, dict) }
                 for it in more:
                     k2 = (it.get("policyName","") + "|" + it.get("detail_url","")).strip()
@@ -2764,23 +2759,23 @@ async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lan
         if not items:
             # Return static policies instead of empty
             payload = {"status": "success", "source": "static_fallback", "query": q, "policies": static_policies}
-            _yc_cache_set(cache_key, payload)
+            await _yc_cache_set(cache_key, payload)
             return json.dumps(payload, ensure_ascii=False)
 
         payload = {"status": "success", "source": "youthcenter_policy", "query": q, "policies": items}
-        _yc_cache_set(cache_key, payload)
+        await _yc_cache_set(cache_key, payload)
         return json.dumps(payload, ensure_ascii=False)
-    except (requests.Timeout, requests.ConnectionError, requests.RequestException) as e:
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.RequestError) as e:
         # Timeout/Connection errors - return static high-value policy list
         print(f"[ARA Debug] Youth Center API Timeout/Error: {e} - Returning static policy list")
         payload = {"status": "success", "source": "static_fallback", "query": q, "policies": static_policies}
-        _yc_cache_set(cache_key, payload)
+        await _yc_cache_set(cache_key, payload)
         return json.dumps(payload, ensure_ascii=False)
     except Exception as e:
         # Other errors - return static high-value policy list
         print(f"[ARA Log] Youth Center API Error: {e} - Returning static policy list")
         payload = {"status": "success", "source": "static_fallback", "query": q, "policies": static_policies}
-        _yc_cache_set(cache_key, payload)
+        await _yc_cache_set(cache_key, payload)
         return json.dumps(payload, ensure_ascii=False)
 
 # =========================
