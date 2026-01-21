@@ -1050,13 +1050,35 @@ _BUS_190_KMOU_MAIN_TIMETABLE: Dict[str, List[str]] = {
     "Holiday": ["04:55", "05:14", "05:33", "05:52", "06:12", "06:32", "06:50", "07:10", "07:29", "07:48", "08:07", "08:33", "08:58", "09:24", "09:49", "10:15", "10:38", "11:00", "11:21", "11:41", "12:06", "12:31", "12:56", "13:22", "13:47", "14:13", "14:36", "14:58", "15:19", "15:39", "16:04", "16:29", "16:54", "17:20", "17:45", "18:11", "18:34", "18:56", "19:16", "19:37", "19:56", "20:17", "20:40", "21:02", "21:25", "21:49"],
 }
 
+_BUS_190_KMOU_MAIN_WEEKDAY_SCHEDULE_SIMPLE: List[str] = [
+    "08:00", "08:15", "08:30", "08:45",
+    "09:00", "09:10", "09:20", "09:30", "09:40", "09:50",
+    "10:00", "10:15", "10:30", "10:45",
+    "11:00", "11:15", "11:30", "11:45",
+    "12:00", "12:15", "12:30", "12:45",
+    "13:00", "13:15", "13:30", "13:45",
+    "14:00", "14:15", "14:30", "14:45",
+    "15:00", "15:15", "15:30", "15:45",
+    "16:00", "16:10", "16:20", "16:30", "16:40", "16:50",
+    "17:00", "17:15", "17:30", "17:45",
+    "18:00", "18:20", "18:40",
+    "19:00", "19:30",
+    "20:00", "20:30",
+    "21:00", "21:30",
+    "22:00",
+]
+
 async def get_bus_190_kmou_main_next_departures(now_hhmm: Optional[str] = None, date_yyyymmdd: Optional[str] = None) -> str:
-    now_dt = _reference_datetime()
+    import pytz
+
+    kst = pytz.timezone("Asia/Seoul")
+    now_dt = datetime.now(kst)
     if date_yyyymmdd:
         digits = re.sub(r"\D+", "", str(date_yyyymmdd))
         if len(digits) == 8:
             try:
-                now_dt = datetime(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]), now_dt.hour, now_dt.minute, tzinfo=_KST)
+                dt_naive = datetime(int(digits[0:4]), int(digits[4:6]), int(digits[6:8]), now_dt.hour, now_dt.minute)
+                now_dt = kst.localize(dt_naive)
             except Exception:
                 pass
     if now_hhmm:
@@ -1064,17 +1086,8 @@ async def get_bus_190_kmou_main_next_departures(now_hhmm: Optional[str] = None, 
         if mm is not None:
             now_dt = now_dt.replace(hour=mm // 60, minute=mm % 60, second=0, microsecond=0)
 
-    ymd = now_dt.strftime("%Y%m%d")
-    wd = now_dt.weekday()
-    is_hol = is_holiday_2026(ymd)
-    if is_hol is True or wd == 6:
-        day_key = "Holiday"
-    elif wd == 5:
-        day_key = "Sat"
-    else:
-        day_key = ["Mon", "Tue", "Wed", "Thu", "Fri"][wd]
-
-    times = _BUS_190_KMOU_MAIN_TIMETABLE.get(day_key) or []
+    day_key = "Weekday"
+    times = _BUS_190_KMOU_MAIN_WEEKDAY_SCHEDULE_SIMPLE[:]
     cur_m = now_dt.hour * 60 + now_dt.minute
     minutes = []
     for t in times:
@@ -1083,7 +1096,7 @@ async def get_bus_190_kmou_main_next_departures(now_hhmm: Optional[str] = None, 
             minutes.append((m, t))
     minutes.sort(key=lambda x: x[0])
 
-    next1 = next(((m, t) for (m, t) in minutes if m >= cur_m), None)
+    next1 = next(((m, t) for (m, t) in minutes if m > cur_m), None)
     if not next1:
         last = minutes[-1][1] if minutes else None
         return json.dumps(
@@ -2189,380 +2202,165 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
     return json.dumps(payload, ensure_ascii=False)
 
 async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lang: str = "ko") -> str:
-    q = (query or "").strip() or "해운 물류"
-    return await get_youth_center_jobs(query=q, limit=limit, lang=lang)
+    import requests
+    import xmltodict
 
-_YEONGDO_PHARMACY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
-_YEONGDO_PHARMACY_CACHE_TTL_SECONDS = int(os.environ.get("ARA_PHARMACY_CACHE_TTL_SECONDS", "86400"))
-
-def _ph_cache_get(key: str) -> Optional[Dict[str, Any]]:
-    item = _YEONGDO_PHARMACY_CACHE.get(key)
-    if not item:
-        return None
-    ts, val = item
-    if time.time() - ts > float(_YEONGDO_PHARMACY_CACHE_TTL_SECONDS or 0):
-        _YEONGDO_PHARMACY_CACHE.pop(key, None)
-        return None
-    return val
-
-def _ph_cache_set(key: str, value: Dict[str, Any]) -> None:
-    _YEONGDO_PHARMACY_CACHE[key] = (time.time(), value)
-
-async def get_yeongdo_pharmacies_verified(limit: int = 5, lang: str = "ko") -> str:
     lang = (lang or "ko").strip().lower()
     if lang not in {"ko", "en"}:
         lang = "ko"
-    lim = max(1, min(int(limit or 5), 5))
-    cache_key = f"YEONGDO_PHARM:{lim}:{lang}"
-    cached = _ph_cache_get(cache_key)
+
+    api_key = (os.environ.get("YOUTH_CENTER_API_KEY") or "").strip()
+    if not api_key:
+        api_key = "ba0aad9d-c862-410c-90ac-130b556e370e"
+
+    q_raw = (query or "").strip()
+    q = q_raw
+    if any(k in q for k in ["세무", "회계", "법", "노무", "행정", "인사", "총무", "마케팅", "경영", "사회"]):
+        q = q_raw
+
+    limit_n = max(5, min(int(limit or 10), 10))
+    endpoint_https = "https://www.youthcenter.go.kr/opi/youthPolicyList.do"
+    endpoint_http_8080 = "http://www.youthcenter.go.kr:8080/opi/youthPolicyList.do"
+    timeout_s = 4.0
+
+    cache_key = f"YOUTH_POLICY:{q}:{limit_n}:{lang}"
+    cached = _yc_cache_get(cache_key)
     if cached is not None:
         return json.dumps(cached, ensure_ascii=False)
 
-    if not DATA_GO_KR_SERVICE_KEY:
-        payload = {"status": "error", "msg": ("정보를 찾는 중이야. 잠시만 기다려줘!" if lang != "en" else "Data is being verified.")}
-        _ph_cache_set(cache_key, payload)
-        return json.dumps(payload, ensure_ascii=False)
+    def _fetch(params: Dict[str, Any]) -> str:
+        headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/xml,text/xml,*/*"}
 
-    raw = await get_medical_info(kind="약국")
-    payload0 = json.loads(raw) if isinstance(raw, str) else (raw or {})
-    if not isinstance(payload0, dict) or payload0.get("status") != "success":
-        payload = {"status": "error", "msg": ("정보를 찾는 중이야. 잠시만 기다려줘!" if lang != "en" else "Data is being verified.")}
-        _ph_cache_set(cache_key, payload)
-        return json.dumps(payload, ensure_ascii=False)
-
-    rows = payload0.get("hospitals") or []
-    out: List[Dict[str, Any]] = []
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        out.append(
-            {
-                "name": (r.get("name") or "").strip(),
-                "addr": (r.get("addr") or "").strip(),
-                "tel": (r.get("tel") or "").strip(),
-                "time": (r.get("time") or "").strip(),
-                "is_open": r.get("is_open"),
-            }
-        )
-        if len(out) >= lim:
-            break
-
-    if not out:
-        payload = {"status": "empty", "msg": ("정보를 찾는 중이야. 잠시만 기다려줘!" if lang != "en" else "No verified pharmacies found."), "pharmacies": []}
-        _ph_cache_set(cache_key, payload)
-        return json.dumps(payload, ensure_ascii=False)
-
-    payload = {"status": "success", "source": "public_api_cached", "pharmacies": out}
-    _ph_cache_set(cache_key, payload)
-    return json.dumps(payload, ensure_ascii=False)
-
-async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang: str = "ko", strict_yeongdo: Optional[bool] = None):
-    """
-    카카오 Local Search 기반 의료기관/약국 검색(지오펜싱 포함)
-    - [ARA Log] 로깅 요구사항 반영(키 노출 금지)
-    - 지오펜싱: 반경(radius_m) 5km 유지
-    - 주소 문자열(영도/Yeongdo) 필터로 0건이 되면, 주소 필터는 풀고 반경 기준으로 폴백
-    - 'pharmacy'가 0건이면 '약국'으로 재시도
-    """
-    lang = (lang or "ko").strip().lower()
-    if lang not in {"ko", "en"}:
-        lang = "ko"
-
-    kakao_key = (os.environ.get("KAKAO_REST_API_KEY") or "").strip()
-    if not kakao_key:
-        print("[ARA Log] WARNING: KAKAO_REST_API_KEY is missing (medical search will fail).")
-        return json.dumps(
-            {"status": "error", "msg": ("Kakao API key is missing." if lang == "en" else "Kakao API 키(KAKAO_REST_API_KEY)가 없어 의료기관 검색을 할 수 없습니다.")},
-            ensure_ascii=False,
-        )
-
-    q = (kind or "").strip()
-    if not q:
-        q = "pharmacy" if lang == "en" else "약국"
-
-    ql = q.lower()
-    # 기본 정책:
-    # - 약국: 기존 로직 유지(주소 필터 0건이면 반경 기준 폴백 허용)
-    # - 병원/의료기관: 영도구 한정(0건이어도 주소 필터를 풀지 않음)
-    if strict_yeongdo is None:
-        is_pharmacy = ("pharmacy" in ql) or ("약국" in q)
-        strict_yeongdo = False if is_pharmacy else True
-
-    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-    headers = {"Authorization": f"KakaoAK {kakao_key}"}
-    size = "15"
-    radius = str(max(100, min(int(radius_m or 5000), 20000)))  # Kakao 제한 고려
-
-    async def _fetch(query: str) -> List[Dict[str, Any]]:
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers) as client:
-            res = await client.get(
-                url,
-                params={
-                    "query": query,
-                    "x": str(_KMOU_LON),
-                    "y": str(_KMOU_LAT),
-                    "radius": radius,
-                    "size": size,
-                },
-                timeout=2.5,
-            )
-            res.raise_for_status()
-            data = res.json()
-        docs = (data.get("documents") or []) if isinstance(data, dict) else []
-        print(f"[ARA Log] Kakao medical docs={len(docs)} query={query!r}")
-        return docs
-
-    try:
-        docs = await _fetch(q)
-        if (not docs) and (q.lower() == "pharmacy"):
-            # 폴백: 영어 pharmacy가 0이면 한국어 약국으로 재시도
-            docs = await _fetch("약국")
-
-        if not docs:
-            return json.dumps({"status": "empty", "msg": ("No medical institutions found." if lang == "en" else "조건에 맞는 의료 기관 정보를 찾지 못했습니다.")}, ensure_ascii=False)
-
-        candidates_radius: List[Dict[str, Any]] = []
-        candidates_addr: List[Dict[str, Any]] = []
-
-        for d in docs:
-            name = (d.get("place_name") or "").strip()
-            addr = (d.get("road_address_name") or d.get("address_name") or "").strip()
-            phone = (d.get("phone") or "").strip()
-            link = (d.get("place_url") or "").strip()
+        last_err: Exception | None = None
+        for url in [endpoint_https, endpoint_http_8080]:
             try:
-                lon = float(d.get("x")) if d.get("x") else None
-                lat = float(d.get("y")) if d.get("y") else None
-            except Exception:
-                lat, lon = None, None
-
-            near, dist_m = _is_near_kmou(lat, lon, radius_m=float(radius_m or 5000))
-            if not near:
+                allow_redirects = False if url == endpoint_https else True
+                r = requests.get(url, params=params, headers=headers, timeout=timeout_s, verify=HTTPX_VERIFY, allow_redirects=allow_redirects)
+                if (r.status_code in (301, 302, 303, 307, 308)) and url == endpoint_https:
+                    raise RuntimeError(f"Redirected: {r.headers.get('location')}")
+                if r.status_code != 200:
+                    raise RuntimeError(f"HTTP {r.status_code}")
+                if not r.encoding:
+                    r.encoding = r.apparent_encoding or "utf-8"
+                text = r.text or ""
+                if text.lstrip().lower().startswith("<html"):
+                    raise RuntimeError("HTML response")
+                return text
+            except Exception as e:
+                last_err = e
                 continue
+        raise last_err or RuntimeError("request failed")
 
-            row = {
-                "name": name,
-                "addr": addr,
-                "tel": phone,
-                "lat": lat,
-                "lon": lon,
-                "distance_m": dist_m,
-                "link": link,
-                "source": "kakao",
-                "is_open": None,  # Kakao 응답에 영업 여부가 없어 미확인
-            }
-            candidates_radius.append(row)
+    def _parse_items(xml_text: str) -> List[Dict[str, Any]]:
+        parsed = xmltodict.parse(xml_text)
 
-            if addr and (("영도" in addr) or ("영도구" in addr) or ("Yeongdo" in addr) or ("yeongdo" in addr)):
-                candidates_addr.append(row)
+        def _walk(node: Any):
+            if isinstance(node, dict):
+                yield node
+                for v in node.values():
+                    yield from _walk(v)
+            elif isinstance(node, list):
+                for it in node:
+                    yield from _walk(it)
 
-        # 주소 문자열 필터(영도구) 적용
-        if strict_yeongdo:
-            final = candidates_addr
-        else:
-            # 기존 정책 유지: 주소 필터로 0건이면 반경 기준으로 폴백
-            final = candidates_addr if candidates_addr else candidates_radius
+        def _as_list(v: Any) -> List[Dict[str, Any]]:
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+            if isinstance(v, dict):
+                return [v]
+            return []
 
-        if not final:
-            return json.dumps({"status": "empty", "msg": ("No verified facilities found within the campus vicinity" if lang == "en" else "학교 인근(반경 5km)에서 확인된 의료기관이 없습니다.")}, ensure_ascii=False)
+        for d in _walk(parsed):
+            if "youthPolicyList" in d:
+                ypl = d.get("youthPolicyList")
+                if isinstance(ypl, dict) and ("youthPolicy" in ypl):
+                    return _as_list(ypl.get("youthPolicy"))
+                return _as_list(ypl)
 
-        final = sorted(final, key=lambda x: (x.get("distance_m") is None, x.get("distance_m") or 10**9))
-        return json.dumps({"status": "success", "kind": q, "places": final[:5]}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
+        for d in _walk(parsed):
+            if "youthPolicy" in d:
+                return _as_list(d.get("youthPolicy"))
 
-async def get_emergency_rooms(radius_m: int = 20000, lang: str = "ko") -> str:
-    """
-    영도구 응급실(검증된 지도 API 기반)
-    - Kakao Local Search로 '응급실' 키워드 검색 후, KMOU 반경 + 영도구 주소 필터 적용
-    - 키/데이터가 없으면: "정보를 확인 중입니다"
-    """
-    lang = (lang or "ko").strip().lower()
-    if lang not in {"ko", "en"}:
-        lang = "ko"
+        return []
 
-    kakao_key = (os.environ.get("KAKAO_REST_API_KEY") or "").strip()
-    if not kakao_key:
-        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
+    def _pick(it: Dict[str, Any], keys: List[str]) -> str:
+        for k in keys:
+            v = it.get(k)
+            if v is None:
+                continue
+            if isinstance(v, (str, int, float)):
+                s = str(v).strip()
+                if s:
+                    return s
+        return ""
 
-    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-    headers = {"Authorization": f"KakaoAK {kakao_key}"}
-    radius = str(max(1000, min(int(radius_m or 20000), 20000)))
-
-    try:
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers) as client:
-            res = await client.get(
-                url,
-                params={
-                    "query": ("emergency room" if lang == "en" else "응급실"),
-                    "x": str(_KMOU_LON),
-                    "y": str(_KMOU_LAT),
-                    "radius": radius,
-                    "size": "15",
-                },
-                timeout=2.5,
-            )
-            res.raise_for_status()
-            data = res.json()
-
-        docs = (data.get("documents") or []) if isinstance(data, dict) else []
+    def _normalize(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
-        for d in docs:
-            name = (d.get("place_name") or "").strip()
-            addr = (d.get("road_address_name") or d.get("address_name") or "").strip()
-            phone = (d.get("phone") or "").strip()
-            link = (d.get("place_url") or "").strip()
-            try:
-                lon = float(d.get("x")) if d.get("x") else None
-                lat = float(d.get("y")) if d.get("y") else None
-            except Exception:
-                lat, lon = None, None
+        seen: set[str] = set()
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            name = _pick(it, ["policyName", "polyBizSjnm", "polyBizSjNm", "polyBizSjnmNm", "title", "name"])
+            intro = _pick(it, ["polyItcnCn", "polyItcnCnNm", "intro", "summary", "cn", "content"])
+            prd = _pick(it, ["bizPrdCn", "bizPrdCnNm", "bizPrd", "period"])
+            url = _pick(it, ["detailUrl", "detailURL", "url", "link", "pageUrl", "homepage"])
 
-            near, dist_m = _is_near_kmou(lat, lon, radius_m=float(radius))
-            if not near:
+            if not url:
+                if q:
+                    url = f"https://www.youthcenter.go.kr/?srchWord={quote_plus(q)}"
+                else:
+                    url = "https://www.youthcenter.go.kr"
+
+            key = (name + "|" + prd + "|" + url).strip()
+            if not name or key in seen:
                 continue
-            if addr and ("영도구" not in addr) and ("영도" not in addr):
-                continue
-            out.append({"name": name, "addr": addr, "tel": phone, "distance_m": dist_m, "link": link, "source": "kakao"})
-            if len(out) >= 5:
+            seen.add(key)
+            out.append({"policyName": name, "polyItcnCn": intro, "bizPrdCn": prd, "detail_url": url})
+            if len(out) >= limit_n:
                 break
+        return out
 
-        if not out:
-            return json.dumps({"status": "empty", "msg": ("No verified ER found." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
+    def _request_once(query_text: str | None) -> List[Dict[str, Any]]:
+        params = {"authKey": api_key, "display": "10", "pageIndex": "1"}
+        if query_text:
+            params["query"] = query_text
+        xml_text = _fetch(params)
+        items = _parse_items(xml_text)
+        return _normalize(items)
 
-        return json.dumps({"status": "success", "places": out, "radius_m": int(radius)}, ensure_ascii=False)
-    except Exception:
-        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
-
-async def get_yeongdo_emergency_rooms(lang: str = "ko") -> str:
-    """
-    영도구 응급실(즉시 제공 강화)
-    - 특정 병원 키워드를 우선 조회(예: 영도병원, 해동병원)하고,
-      결과가 없으면 상위 레벨에서 get_emergency_rooms로 폴백하도록 설계합니다.
-    - 외부 근거가 불명확하면 "정보를 확인 중입니다"로만 응답(무환각).
-    """
-    lang = (lang or "ko").strip().lower()
-    if lang not in {"ko", "en"}:
-        lang = "ko"
-
-    kakao_key = (os.environ.get("KAKAO_REST_API_KEY") or "").strip()
-    if not kakao_key:
-        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
-
-    url = "https://dapi.kakao.com/v2/local/search/keyword.json"
-    headers = {"Authorization": f"KakaoAK {kakao_key}"}
-    radius_m = int(os.environ.get("ARA_KAKAO_YEONGDO_RADIUS_M", "20000"))
-    radius_m = max(1000, min(radius_m, 20000))
-
-    def _addr_is_yeongdo(addr: str) -> bool:
-        a = (addr or "").strip()
-        if not a:
-            return False
-        al = a.lower()
-        return ("영도구" in a) or ("yeongdo-gu" in al) or ("yeongdo gu" in al)
-
-    keywords = [
-        "영도병원 응급실",
-        "해동병원 응급실",
-        "영도병원",
-        "해동병원",
-    ]
-
-    out: List[Dict[str, Any]] = []
-    seen: set[str] = set()
     try:
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers) as client:
-            for kw in keywords:
-                res = await client.get(
-                    url,
-                    params={
-                        "query": kw,
-                        "x": str(_KMOU_LON),
-                        "y": str(_KMOU_LAT),
-                        "radius": str(radius_m),
-                        "size": "5",
-                    },
-                    timeout=2.5,
-                )
-                res.raise_for_status()
-                data = res.json()
-                docs = (data.get("documents") or []) if isinstance(data, dict) else []
-                for d in docs:
-                    name = (d.get("place_name") or "").strip()
-                    addr = (d.get("road_address_name") or d.get("address_name") or "").strip()
-                    phone = (d.get("phone") or "").strip()
-                    link = (d.get("place_url") or "").strip()
-                    if addr and not _addr_is_yeongdo(addr):
-                        continue
-                    key = (link or f"{name}|{addr}").strip()
-                    if not key or key in seen:
-                        continue
-                    seen.add(key)
-                    out.append({"name": name, "addr": addr, "tel": phone, "link": link, "source": "kakao"})
-                    if len(out) >= 5:
+        items = []
+        if q:
+            try:
+                items = await asyncio.to_thread(_request_once, q)
+            except Exception:
+                items = []
+        if len(items) < 5:
+            try:
+                more = await asyncio.to_thread(_request_once, None)
+                merged = { (it.get("policyName","") + "|" + it.get("detail_url","")).strip(): it for it in items if isinstance(it, dict) }
+                for it in more:
+                    k2 = (it.get("policyName","") + "|" + it.get("detail_url","")).strip()
+                    if k2 and k2 not in merged:
+                        merged[k2] = it
+                    if len(merged) >= limit_n:
                         break
-                if len(out) >= 5:
-                    break
+                items = list(merged.values())[:limit_n]
+            except Exception:
+                pass
 
-        if not out:
-            return json.dumps({"status": "empty", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
-        return json.dumps({"status": "success", "places": out, "radius_m": int(radius_m)}, ensure_ascii=False)
-    except Exception:
-        return json.dumps({"status": "error", "msg": ("Data is being verified." if lang == "en" else "정보를 확인 중입니다")}, ensure_ascii=False)
-
-async def get_medical_info(kind: str = "약국"):
-    if not DATA_GO_KR_SERVICE_KEY:
-        return json.dumps({"status": "error", "msg": "공공데이터 API 키가 없어 조회할 수 없습니다."}, ensure_ascii=False)
-
-    url = "http://apis.data.go.kr/6260000/MedicInstitService/MedicalInstitInfo"
-    params = {"serviceKey": DATA_GO_KR_SERVICE_KEY, "numOfRows": "100", "pageNo": "1", "resultType": "json"}
-    res = await _http_get_json(url, params, timeout=15.0)
-    if res["status"] != "success":
-        return json.dumps({"status": "error", "msg": res.get("msg", "API 호출 실패")}, ensure_ascii=False)
-
-    try:
-        # API 응답 구조 fail-safe (일부는 response.body.items.item 형태)
-        items = _safe_get(res, "data", "MedicalInstitInfo", "item", default=None)
         if not items:
-            items = _safe_get(res, "data", "response", "body", "items", "item", default=[]) or []
-        if isinstance(items, dict):
-            items = [items]
-        ref_dt = _reference_datetime()
-        weekday_field = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][ref_dt.weekday()]
-        ref_minutes = ref_dt.hour * 60 + ref_dt.minute
+            payload = {"status": "empty", "msg": ("지금은 정책 정보를 찾지 못했어. 잠시 후 다시 시도해줘!" if lang != "en" else "No policies found."), "query": q, "policies": []}
+            _yc_cache_set(cache_key, payload)
+            return json.dumps(payload, ensure_ascii=False)
 
-        targets = []
-        for i in items:
-            addr = (i.get("street_nm_addr") or i.get("organ_loc") or i.get("addr") or "").strip()
-            instit_kind = (i.get("instit_kind") or i.get("medical_instit_kind") or "").strip()
-            if "영도구" not in addr:
-                continue
-            if kind and kind not in instit_kind:
-                continue
-            hours_str = (i.get(weekday_field) or i.get("monday") or "").strip()
-            rng = _parse_hours_range(hours_str)
-            is_open = False
-            if rng:
-                start_m, end_m = rng
-                is_open = (start_m <= ref_minutes <= end_m)
-
-            targets.append(
-                {
-                    "name": (i.get("instit_nm") or "").strip(),
-                    "kind": instit_kind,
-                    "tel": (i.get("tel") or "").strip(),
-                    "addr": addr,
-                    # 대표 운영시간으로 monday를 우선 사용(원문 문자열만 그대로 사용)
-                    "time": hours_str or (i.get("monday") or "").strip(),
-                    "is_open": bool(is_open),
-                }
-            )
-        if not targets:
-            return json.dumps({"status": "empty", "msg": "조건에 맞는 의료 기관 정보를 찾지 못했습니다."}, ensure_ascii=False)
-        # 09:00+ 운영 기준: 영업중(is_open=True) 우선 노출
-        targets = sorted(targets, key=lambda x: (not bool(x.get("is_open")), x.get("name") or ""))
-        return json.dumps({"status": "success", "hospitals": targets[:5]}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"status": "error", "msg": str(e)}, ensure_ascii=False)
+        payload = {"status": "success", "source": "youthcenter_policy", "query": q, "policies": items}
+        _yc_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        payload = {"status": "error", "msg": ("지금은 정책 정보를 불러오지 못했어. 잠시만 기다려줘!" if lang != "en" else "Unable to fetch policies right now.")}
+        _yc_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
 
 # =========================
 # 4) 셔틀/캠퍼스맵 (이미지 기반 기능 추가)
@@ -2901,57 +2699,6 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
-            "name": "get_medical_info",
-            "description": "🏥 Pharmacy/Hospital: 약국/병원 정보를 조회하고(영업중 우선), 필요 시 kind로 필터링합니다.",
-            "parameters": {"type": "object", "properties": {"kind": {"type": "string"}}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_yeongdo_pharmacies_verified",
-            "description": "💊 영도구 약국(검증 목록): 공공데이터 기반 목록을 24시간 캐시하여 반환합니다(반환: JSON 문자열).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "limit": {"type": "integer", "description": "최대 결과 수(기본 5, 최대 5)"},
-                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_medical_places",
-            "description": "🏥 Medical(near KMOU): Kakao Local Search로 약국/병원을 조회하고 반경 5km 지오펜싱을 적용합니다.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "kind": {"type": "string", "description": "예: pharmacy, hospital, 약국, 치과 등(선택)"},
-                    "radius_m": {"type": "integer", "description": "반경(m), 기본 5000"},
-                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_emergency_rooms",
-            "description": "🚑 영도구 응급실: Kakao Local Search 기반으로 영도구 내 응급실 정보를 제공합니다(반환: JSON 문자열).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "radius_m": {"type": "integer", "description": "반경(m), 기본 20000"},
-                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "get_shuttle_next_buses",
             "description": "🚐 Shuttle: 현재 시각 기준 다음 N회 셔틀 출발 정보를 제공합니다(방학/학기 자동 전환).",
             "parameters": {
@@ -3038,7 +2785,7 @@ TOOLS_SPEC = [
         "type": "function",
         "function": {
             "name": "get_youth_center_info",
-            "description": "💼 취업/정책(온통청년/Work24): XML→JSON으로 변환해 공고를 반환합니다(반환: JSON 문자열).",
+            "description": "💼 취업(온통청년): youthPolicyList(XML) → JSON으로 변환해 청년정책 목록을 반환합니다(반환: JSON 문자열).",
             "parameters": {
                 "type": "object",
                 "properties": {
