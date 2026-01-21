@@ -2054,6 +2054,8 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
 
     api_key = (os.environ.get("YOUTH_CENTER_API_KEY") or os.environ.get("WORK24_OPENAPI_KEY") or "").strip()
     if not api_key:
+        api_key = "ba0aad9d-c862-410c-90ac-130b556e370e"
+    if not api_key:
         return json.dumps({"status": "error", "msg": ("정보를 확인 중입니다" if lang != "en" else "Data is being verified.")}, ensure_ascii=False)
 
     q = (query or "").strip()
@@ -2184,6 +2186,74 @@ async def get_youth_center_jobs(query: str, limit: int = 5, lang: str = "ko") ->
 
     payload = {"status": "success", "source": "youth_center_work24", "query": q, "jobs": out}
     _yc_cache_set(cache_key, payload)
+    return json.dumps(payload, ensure_ascii=False)
+
+async def get_youth_center_info(query: Optional[str] = None, limit: int = 5, lang: str = "ko") -> str:
+    q = (query or "").strip() or "해운 물류"
+    return await get_youth_center_jobs(query=q, limit=limit, lang=lang)
+
+_YEONGDO_PHARMACY_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+_YEONGDO_PHARMACY_CACHE_TTL_SECONDS = int(os.environ.get("ARA_PHARMACY_CACHE_TTL_SECONDS", "86400"))
+
+def _ph_cache_get(key: str) -> Optional[Dict[str, Any]]:
+    item = _YEONGDO_PHARMACY_CACHE.get(key)
+    if not item:
+        return None
+    ts, val = item
+    if time.time() - ts > float(_YEONGDO_PHARMACY_CACHE_TTL_SECONDS or 0):
+        _YEONGDO_PHARMACY_CACHE.pop(key, None)
+        return None
+    return val
+
+def _ph_cache_set(key: str, value: Dict[str, Any]) -> None:
+    _YEONGDO_PHARMACY_CACHE[key] = (time.time(), value)
+
+async def get_yeongdo_pharmacies_verified(limit: int = 5, lang: str = "ko") -> str:
+    lang = (lang or "ko").strip().lower()
+    if lang not in {"ko", "en"}:
+        lang = "ko"
+    lim = max(1, min(int(limit or 5), 5))
+    cache_key = f"YEONGDO_PHARM:{lim}:{lang}"
+    cached = _ph_cache_get(cache_key)
+    if cached is not None:
+        return json.dumps(cached, ensure_ascii=False)
+
+    if not DATA_GO_KR_SERVICE_KEY:
+        payload = {"status": "error", "msg": ("정보를 찾는 중이야. 잠시만 기다려줘!" if lang != "en" else "Data is being verified.")}
+        _ph_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+
+    raw = await get_medical_info(kind="약국")
+    payload0 = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    if not isinstance(payload0, dict) or payload0.get("status") != "success":
+        payload = {"status": "error", "msg": ("정보를 찾는 중이야. 잠시만 기다려줘!" if lang != "en" else "Data is being verified.")}
+        _ph_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+
+    rows = payload0.get("hospitals") or []
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        out.append(
+            {
+                "name": (r.get("name") or "").strip(),
+                "addr": (r.get("addr") or "").strip(),
+                "tel": (r.get("tel") or "").strip(),
+                "time": (r.get("time") or "").strip(),
+                "is_open": r.get("is_open"),
+            }
+        )
+        if len(out) >= lim:
+            break
+
+    if not out:
+        payload = {"status": "empty", "msg": ("정보를 찾는 중이야. 잠시만 기다려줘!" if lang != "en" else "No verified pharmacies found."), "pharmacies": []}
+        _ph_cache_set(cache_key, payload)
+        return json.dumps(payload, ensure_ascii=False)
+
+    payload = {"status": "success", "source": "public_api_cached", "pharmacies": out}
+    _ph_cache_set(cache_key, payload)
     return json.dumps(payload, ensure_ascii=False)
 
 async def get_medical_places(kind: str = "pharmacy", radius_m: int = 5000, lang: str = "ko", strict_yeongdo: Optional[bool] = None):
@@ -2839,6 +2909,20 @@ TOOLS_SPEC = [
     {
         "type": "function",
         "function": {
+            "name": "get_yeongdo_pharmacies_verified",
+            "description": "💊 영도구 약국(검증 목록): 공공데이터 기반 목록을 24시간 캐시하여 반환합니다(반환: JSON 문자열).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "최대 결과 수(기본 5, 최대 5)"},
+                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_medical_places",
             "description": "🏥 Medical(near KMOU): Kakao Local Search로 약국/병원을 조회하고 반경 5km 지오펜싱을 적용합니다.",
             "parameters": {
@@ -2945,6 +3029,21 @@ TOOLS_SPEC = [
                 "properties": {
                     "category": {"type": "string", "description": "예: Emergency, Academic_Affairs 등(선택)"},
                     "office": {"type": "string", "description": "예: Integrated_Security_Office 등(선택)"},
+                    "lang": {"type": "string", "description": "ko 또는 en(선택)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_youth_center_info",
+            "description": "💼 취업/정책(온통청년/Work24): XML→JSON으로 변환해 공고를 반환합니다(반환: JSON 문자열).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "검색 키워드(예: 해운 물류, 세무 회계, 청년정책)"},
+                    "limit": {"type": "integer", "description": "최대 결과 수(기본 5, 최대 5)"},
                     "lang": {"type": "string", "description": "ko 또는 en(선택)"},
                 },
             },
