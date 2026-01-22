@@ -26,6 +26,7 @@ from rapidfuzz import fuzz
 from database import (
     init_db,
     update_conversation_feedback,
+    get_conversation_by_id,
     get_pending_state,
     set_pending_state,
     clear_pending_state,
@@ -473,6 +474,26 @@ def _kakao_simple_text(text: str):
         ],
     )
 
+def _add_feedback_buttons(buttons: list[dict] | None, conversation_id: str | None = None) -> list[dict]:
+    """
+    피드백 버튼(👍/👎)을 기존 버튼 리스트에 추가
+    - conversation_id가 있으면 피드백 엔드포인트로 연결
+    """
+    if buttons is None:
+        buttons = []
+    
+    if conversation_id:
+        # 피드백 버튼 추가 (카카오 메시지 액션으로 피드백 전송)
+        feedback_buttons = [
+            {"action": "message", "label": "👍 도움됨", "messageText": f"feedback:+1:{conversation_id}"},
+            {"action": "message", "label": "👎 불만족", "messageText": f"feedback:-1:{conversation_id}"},
+        ]
+        # 기존 버튼 + 피드백 버튼 (최대 3개)
+        combined = (buttons[:1] if len(buttons) > 0 else []) + feedback_buttons
+        return combined[:3]
+    
+    return buttons
+
 def _kakao_basic_card(
     title: str,
     description: str,
@@ -480,6 +501,7 @@ def _kakao_basic_card(
     thumbnail: dict | None = None,
     quick_replies: list[dict] | None = None,
     thumbnail_type: str = "Default",
+    conversation_id: str | None = None,
 ):
     # Mandatory thumbnail to prevent Kakao Error 2461
     # Use function-specific thumbnail if provided, else use type-based mapping
@@ -489,13 +511,16 @@ def _kakao_basic_card(
         thumb_url = _THUMBNAIL_MAP.get(thumbnail_type, _THUMBNAIL_MAP["Default"])
         thumb_dict = {"imageUrl": thumb_url}
     
+    # 피드백 버튼 추가 (AI 응답인 경우)
+    final_buttons = _add_feedback_buttons(buttons, conversation_id)
+    
     card: dict = {
         "title": title,
         "description": description,
         "thumbnail": thumb_dict
     }
-    if buttons:
-        card["buttons"] = buttons
+    if final_buttons:
+        card["buttons"] = final_buttons
     return _kakao_response([{"basicCard": card}], quick_replies=quick_replies)
 
 def _kakao_list_card(header_title: str, items: list[dict], buttons: list[dict] | None = None, quick_replies: list[dict] | None = None):
@@ -1469,6 +1494,9 @@ async def feedback_endpoint(request: Request):
     {
       "conversation_id": "...",
       "user_feedback": 1,   # 1 또는 -1
+      "user_id": "...",
+      "user_query": "...",
+      "ai_answer": "...",
       "is_gold_standard": false
     }
     """
@@ -1480,6 +1508,9 @@ async def feedback_endpoint(request: Request):
     conversation_id = (data.get("conversation_id") or "").strip()
     user_feedback = data.get("user_feedback")
     is_gold_standard = data.get("is_gold_standard", None)
+    user_id = data.get("user_id")
+    user_query = data.get("user_query", "")
+    ai_answer = data.get("ai_answer", "")
 
     if not conversation_id:
         return {"ok": False, "msg": "conversation_id가 필요합니다."}
@@ -1491,6 +1522,24 @@ async def feedback_endpoint(request: Request):
     changed = update_conversation_feedback(conversation_id, int(user_feedback), is_gold_standard=is_gold_standard)
     if not changed:
         return {"ok": False, "msg": "해당 conversation_id를 찾을 수 없습니다."}
+    
+    # [피드백 로깅] 불만족(👎) 피드백은 negative_feedback.log에 저장 (Data Augmentation용)
+    if user_feedback == -1:
+        try:
+            log_entry = {
+                "timestamp": datetime.now(_KST).isoformat(),
+                "conversation_id": conversation_id,
+                "user_id": user_id,
+                "user_query": user_query,
+                "ai_answer": ai_answer,
+                "feedback": user_feedback,
+            }
+            log_file = Path(__file__).resolve().parent / "negative_feedback.log"
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+        except Exception as e:
+            print(f"[Feedback Log Error] 로그 저장 실패: {e}")
+    
     return {"ok": True}
 
 @app.post("/query")
@@ -1543,7 +1592,27 @@ async def kakao_endpoint(request: Request):
         if m:
             score = int(m.group("score"))
             cid = m.group("cid")
+            # DB 업데이트
             ok = update_conversation_feedback(cid, score)
+            # negative_feedback.log에도 기록 (불만족인 경우)
+            if score == -1:
+                try:
+                    from database import get_conversation_by_id
+                    conv = get_conversation_by_id(cid)
+                    if conv:
+                        log_entry = {
+                            "timestamp": datetime.now(_KST).isoformat(),
+                            "conversation_id": cid,
+                            "user_id": kakao_user_id,
+                            "user_query": conv.get("user_query", ""),
+                            "ai_answer": conv.get("ai_answer", ""),
+                            "feedback": score,
+                        }
+                        log_file = Path(__file__).resolve().parent / "negative_feedback.log"
+                        with open(log_file, "a", encoding="utf-8") as f:
+                            f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                except Exception as e:
+                    print(f"[Feedback Log Error] 로그 저장 실패: {e}")
             return _kakao_basic_card(
                 title="피드백",
                 description=("피드백이 반영되었습니다. 감사합니다." if ok else "피드백 대상을 찾지 못했습니다."),
@@ -1603,11 +1672,15 @@ async def kakao_endpoint(request: Request):
             )
 
         response_text = (res.get("content", "") if isinstance(res, dict) else str(res)).strip()
+        conversation_id = res.get("conversation_id") if isinstance(res, dict) else None
+        
         # 카드 UI 강제: LLM 응답도 basicCard/listCard로만 래핑
+        # 피드백 버튼 포함 (conversation_id 전달)
         return _kakao_basic_card(
             title="ARA 답변",
             description=_normalize_desc(response_text),
             buttons=[{"action": "message", "label": "다시 질문", "messageText": "다시 질문"}],
+            conversation_id=conversation_id,
         )
 
     except Exception as e:

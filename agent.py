@@ -21,6 +21,7 @@ from tools import (
     get_academic_schedule,
 )
 from database import init_db, save_conversation_pair, get_success_examples, get_history, save_history
+from rag import get_university_context
 
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = AsyncOpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
@@ -438,11 +439,20 @@ async def ask_ara(
         return "현재 `OPENAI_API_KEY` 환경 변수가 설정되지 않아 답변을 생성할 수 없습니다.\n버스 기능은 사용 가능하며, 그 외 기능은 키 설정 후 이용해 주시기 바랍니다."
 
     persona = (
-        "당신은 한국해양대학교(KMOU) 학생들을 위한 스마트 AI 비서 'ARA'입니다.\n"
-        "중요: 반드시 한국어로만 답변하십시오.\n"
-        "톤: 20대 대학생 창업가/AI 맥시멀리스트 느낌의 자신감 있는 말투를 사용하되, 반드시 정중함과 공손함을 유지하십시오.\n\n"
+        "# Role: 한국해양대학교(KMOU) 재학생 전용 개인 비서 \"ARA\"\n\n"
+        "# Persona\n"
+        "1. 당신은 한국해양대학교 재학생들을 돕는 전문적이고 신뢰감 있는 개인 비서입니다.\n"
+        "2. 모든 답변은 예외 없이 반드시 **격식 있는 존댓말**을 사용하십시오.\n"
+        "3. 재학생의 입장에서 생각하며, 학우님의 대학 생활을 최우선으로 지원합니다.\n\n"
     )
 
+    # [RAG] 한국해양대학교 학칙 및 규정 검색
+    university_context = None
+    try:
+        university_context = await get_university_context(user_input, top_k=3)
+    except Exception as e:
+        print(f"[RAG Warning] 학칙 검색 실패: {e}")
+    
     # 실시간 컨텍스트(시간 인지) — main.py에서 KST로 계산된 값만 주입
     ctx_lines: list[str] = []
     if isinstance(current_context, dict) and current_context:
@@ -460,15 +470,43 @@ async def ask_ara(
     current_context_block = ""
     if ctx_lines:
         current_context_block = "## 현재 컨텍스트\n" + "\n".join(ctx_lines) + "\n\n"
+    
+    # [RAG] 검색된 학칙 컨텍스트 추가
+    rag_context_block = ""
+    if university_context:
+        rag_context_block = "## [Context] 한국해양대학교 학칙 및 규정\n" + university_context + "\n\n"
+    else:
+        # 학칙 관련 질문인데 검색 결과가 없으면 거절 메시지 반환
+        if any(kw in user_input for kw in ["학칙", "규정", "장학금", "등록금", "수강신청", "졸업", "휴학", "복학", "학사", "교칙"]):
+            response_text = "학우님, 해당 내용은 현재 제가 보유한 학칙 데이터에서 확인이 어렵습니다. 정확한 확인을 위해 학교 본부 해당 부서에 문의하시길 정중히 권장드립니다."
+            save_conversation_pair(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_query=user_input,
+                ai_answer=response_text,
+                tools_used=[],
+                user_feedback=0,
+                is_gold_standard=False,
+            )
+            if return_meta:
+                return {"content": response_text, "conversation_id": conversation_id}
+            return response_text
 
     system_prompt = {
         "role": "system",
         "content": (
             persona
             + current_context_block
-            + "## 절대 규칙\n"
-            + "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '사용자님' 또는 무호칭입니다.\n"
-            + "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 필요한 경우 '확인할 수 없습니다'라고 명시하십시오.\n"
+            + rag_context_block
+            + "# Constraints (환각 방지 및 규칙)\n"
+            + "1. 답변의 근거는 반드시 제공된 [Context] 데이터 내에서만 찾아야 합니다.\n"
+            + "   - [Context]에는 tools.py 도구가 반환한 raw data, 현재 컨텍스트(시간/날짜), 과거 성공 사례 등이 포함됩니다.\n"
+            + "2. [Context]에 질문에 대한 명확한 답변이 없는 경우, 절대 지어내지 말고 다음과 같이 답하십시오:\n"
+            + "   - \"학우님, 해당 내용은 현재 제가 보유한 학칙 데이터에서 확인이 어렵습니다. 정확한 확인을 위해 학교 본부 해당 부서에 문의하시길 정중히 권장드립니다.\"\n"
+            + "3. 한국해양대학교 재학생 생활(버스, 학칙, 장학금, 취업 등)과 관련 없는 일반적인 질문이나 무의미한 질문에는 답변하지 않거나, 재학생 비서로서의 본분을 정중히 안내하십시오.\n\n"
+            + "## 절대 규칙 (기술적 제약)\n"
+            + "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '학우님' 또는 무호칭입니다.\n"
+            + "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 위의 Constraints에 따라 학교 부서 문의를 권장하십시오.\n"
             + "- 숫자/수치 금지 환각: 절대 숫자를 추측하거나 임의로 생성하지 마십시오. 응답에 포함되는 모든 숫자/수치는 반드시 tools.py 도구가 반환한 raw data에서 직접 근거를 가져야 합니다.\n"
             + "- 도구 우선: 버스/날씨/맛집/취업 등 데이터가 필요한 질문은 반드시 제공된 도구를 호출하여 결과를 기반으로 답하십시오.\n"
             + "- raw data 원칙: 도구를 호출한 경우, tools.py가 반환한 raw data(JSON 문자열/객체)만을 근거로 답변하십시오. raw data에 없는 항목(시간, 금액, 개수, 순위 등)을 임의로 만들어내지 마십시오.\n"
@@ -500,7 +538,11 @@ async def ask_ara(
             "\n## 자가 최적화 지침(Self-Improvement)\n"
             "- 당신은 과거의 성공 사례를 참고하여 답변의 정확도와 유용성을 스스로 높여야 합니다.\n"
             "- 사용자 피드백이 좋았던 답변 스타일/구조를 우선적으로 채택하되, 사실에 근거하지 않은 추측은 금지합니다.\n"
-            f"{examples_block}"
+            f"{examples_block}\n"
+            "# Formatting\n"
+            "1. 가독성을 위해 불렛 포인트나 번호 매기기를 적절히 활용하십시오.\n"
+            "2. 답변 끝에는 항상 재학생의 안녕을 바라는 정중한 인사를 덧붙이십시오.\n"
+            "   예: \"학우님의 대학 생활이 원활하시길 바랍니다.\" 또는 \"학우님의 학업과 생활에 도움이 되었기를 바랍니다.\"\n"
         )
     }
     
@@ -509,11 +551,11 @@ async def ask_ara(
 
     try:
         response = await client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="ft:gpt-3.5-turbo-0125:personal:D0ovVHZb",
             messages=messages,
             tools=TOOLS_SPEC,
             tool_choice="auto",
-            temperature=0.5,
+            temperature=0.0,  # 환각 방지: temperature=0
         )
         msg = response.choices[0].message
 
@@ -539,7 +581,7 @@ async def ask_ara(
             final_res = await client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                temperature=0.5,
+                temperature=0.0,  # 환각 방지: temperature=0
             )
             response_text = _sanitize_response_text_with_context(final_res.choices[0].message.content, user_input)
             if user_id:

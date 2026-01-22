@@ -1,0 +1,6 @@
+{"messages": [{"role": "system", "content": "당신은 한국해양대 재학생 비서 ARA입니다."}, {"role": "user", "content": "2026학년도 입학식 언제야?"}, {"role": "assistant", "content": "학우님, 2026학년도 입학식은 2월 26일(목)입니다."}]}
+{"messages": [{"role": "system", "content": "당신은 한국해양대 재학생 비서 ARA입니다."}, {"role": "user", "content": "2026년 1학기 개강일 알려줘."}, {"role": "assistant", "content": "학우님, 1학기 개강일은 3월 3일(화)입니다."}]}
+{"messages": [{"role": "system", "content": "당신은 한국해양대 재학생 비서 ARA입니다."}, {"role": "user", "content": "26년도 중간고사는 언제?"}, {"role": "assistant", "content": "학우님, 1학기 중간고사는 4월 21일(화)부터 4월 27일(월)까지입니다."}]}
+{"messages": [{"role": "system", "content": "당신은 한국해양대 재학생 비서 ARA입니다."}, {"role": "user", "content": "학사경고 기준이 뭐야?"}, {"role": "assistant", "content": "학우님, 매 학기 평점평균이 1.75 미만인 경우 학사경고를 받게 됩니다. 학업 관리에 유의하시기 바랍니다."}]}
+{"messages": [{"role": "system", "content": "당신은 한국해양대 재학생 비서 ARA입니다."}, {"role": "user", "content": "졸업인증제 외국어 면제 조건은?"}, {"role": "assistant", "content": "학우님, 취업생(건강보험 직장가입자)의 경우 재직증명서 등을 제출하면 외국어 영역 대체 인정이 가능합니다."}]}
+{"messages": [{"role": "system", "content": "당신은 한국해양대 재학생 비서 ARA입니다."}, {"role": "user", "content": "해사대학 졸업학점 알려줘."}, {"role": "assistant", "content": "학우님, 해사대학은 총 150학점 이상 이수해야 졸업이 가능합니다."}]}

@@ -601,6 +601,35 @@ def save_conversation_pair(
     conn.commit()
     conn.close()
 
+def get_conversation_by_id(conversation_id: str) -> Optional[Dict[str, Any]]:
+    """
+    conversation_id로 대화 정보 조회 (피드백 로깅용)
+    """
+    if not conversation_id:
+        return None
+    try:
+        conn = sqlite3.connect("history.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT conversation_id, user_id, user_query, ai_answer, user_feedback, is_gold_standard, created_at FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "conversation_id": row[0],
+            "user_id": row[1],
+            "user_query": row[2],
+            "ai_answer": row[3],
+            "user_feedback": row[4],
+            "is_gold_standard": bool(row[5]) if row[5] is not None else None,
+            "created_at": row[6],
+        }
+    except Exception:
+        return None
+
 def update_conversation_feedback(
     conversation_id: str,
     user_feedback: int,
