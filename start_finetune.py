@@ -2,8 +2,12 @@ import os
 from openai import OpenAI
 
 # 1. API 키 설정 (환경 변수 우선, 없으면 기본값 사용)
-import os
 API_KEY = os.environ.get("OPENAI_API_KEY")
+if not API_KEY:
+    print("오류: OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
+    exit(1)
+
+client = OpenAI(api_key=API_KEY)
 
 # 2. 파일 업로드
 print("Uploading file to OpenAI...")

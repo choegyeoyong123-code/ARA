@@ -51,7 +51,6 @@ _LANG_TAG_RE = re.compile(r"^\[LANG:(EN|KO)\]\s*$", flags=re.IGNORECASE)
 def _strip_legacy_lang_tags(history: list) -> list:
     """
     과거 버전에서 저장된 [LANG:..] system 메시지를 제거합니다.
-    (요구사항: lang 분기/로직 제거 → 더 이상 태그를 쓰지 않음)
     """
     out = []
     for it in (history or []):
@@ -78,7 +77,6 @@ def _sanitize_response_text(text: str) -> str:
 def _sanitize_response_text_with_context(text: str, user_input: str | None = None) -> str:
     """
     응답 정제(금지 호칭 제거 + 실패 시 대안 제시).
-    - '확인할 수 없습니다' 같은 단순 거절을, 질문 재구성/대안 안내로 보강합니다.
     """
     text = _sanitize_response_text(text)
     if not user_input:
@@ -86,7 +84,6 @@ def _sanitize_response_text_with_context(text: str, user_input: str | None = Non
 
     if _is_bus_query(user_input) and re.search(r"(확인할 수 없습니다|알 수 없습니다)", text):
         bus_num = _extract_digits(user_input) or "190"
-        # 기존 거절 문구를 더 유용한 질문/안내로 치환
         text = re.sub(
             r"(확인할 수 없습니다|알 수 없습니다)",
             f"{bus_num}번 버스 정보를 찾으시는 건가요? 현재 도착 정보가 없거나 입력이 불완전할 수 있습니다. "
@@ -104,19 +101,11 @@ def _is_bus_query(text: str) -> bool:
     t = (text or "").lower()
     if "버스" in t:
         return True
-    # 오타 포함 번호만 있는 경우도 버스 의도로 간주(예: 190qjs)
     return bool(re.search(r"\d{2,4}", t)) and any(k in t for k in ["도착", "정류장", "위치", "언제", "몇분", "분"])
 
 def _infer_direction(text: str) -> str | None:
-    """
-    사용자 발화에서 방향을 자동 추론합니다.
-    - '학교'/'등교' 포함 -> IN
-    - '부산역'/'하교' 포함 -> OUT
-    - 명시(IN/OUT/진입/진출)가 있으면 우선
-    """
     t = (text or "")
     tl = t.lower()
-    # explicit
     if re.search(r"\bOUT\b", t, flags=re.IGNORECASE) or "진출" in t:
         return "OUT"
     if re.search(r"\bIN\b", t, flags=re.IGNORECASE) or "진입" in t:
@@ -131,7 +120,6 @@ def _infer_direction(text: str) -> str | None:
     return None
 
 def _norm_utterance(text: str) -> str:
-    """버튼 문구 매칭용 정규화(공백/대소문자/기호 차이를 완화)."""
     t = (text or "").strip().lower()
     t = re.sub(r"\s+", "", t)
     t = t.replace("?", "").replace("!", "").replace(".", "").replace(",", "")
@@ -243,17 +231,13 @@ async def ask_ara(
         else:
             history = []
 
-    # 요구사항: lang 관련 분기/로직 제거(항상 한국어)
     _ = session_lang
     lang = "ko"
     history = _strip_legacy_lang_tags(history or [])
 
-    # DB 초기화(테이블/컬럼 보장)
     init_db()
-
     conversation_id = str(uuid.uuid4())
 
-    # 과거 성공 사례(피드백 기반) few-shot 주입용
     success_examples = get_success_examples(limit=5)
     examples_block = ""
     if success_examples:
@@ -267,13 +251,8 @@ async def ask_ara(
         if len(examples_lines) > 1:
             examples_block = "\n" + "\n".join(examples_lines) + "\n"
 
-    # ---------------------
-    # Fast path: 6개 버튼 문구는 OpenAI 우회(즉시 tools 호출)
-    # - 카카오 응답 타임아웃 방지 목적
-    # ---------------------
     norm = _norm_utterance(user_input)
     if norm in {_norm_utterance("학식"), _norm_utterance("오늘 학식"), _norm_utterance("오늘의 식단")}:
-        # 크롤링/추측 금지: 공식 Coop 사이트 링크만 제공
         response_text = "학식은 한국해양대학교 공식 페이지에서 확인하실 수 있습니다.\nhttps://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"
         response_text = _sanitize_response_text_with_context(response_text, user_input)
         save_conversation_pair(
@@ -377,15 +356,10 @@ async def ask_ara(
             return {"content": response_text, "conversation_id": conversation_id}
         return response_text
 
-    # ---------------------
-    # Deterministic bus intent handling (fuzzy + direction inference + fallback)
-    # ---------------------
     if _is_bus_query(user_input):
         bus_num = _extract_digits(user_input) or None
-        # 버스 번호가 없으면 KMOU 핵심 노선 190을 기본값으로 상정
         if not bus_num:
             bus_num = "190"
-        # 버스 방향은 OUT(남포행)으로 고정합니다.
         direction = "OUT"
 
         try:
@@ -434,7 +408,6 @@ async def ask_ara(
             return {"content": response_text, "conversation_id": conversation_id}
         return response_text
 
-    # OpenAI 키가 없으면(버스 외) 답변 생성 불가
     if client is None:
         return "현재 `OPENAI_API_KEY` 환경 변수가 설정되지 않아 답변을 생성할 수 없습니다.\n버스 기능은 사용 가능하며, 그 외 기능은 키 설정 후 이용해 주시기 바랍니다."
 
@@ -446,14 +419,12 @@ async def ask_ara(
         "3. 재학생의 입장에서 생각하며, 학우님의 대학 생활을 최우선으로 지원합니다.\n\n"
     )
 
-    # [RAG] 한국해양대학교 학칙 및 규정 검색
     university_context = None
     try:
         university_context = await get_university_context(user_input, top_k=3)
     except Exception as e:
         print(f"[RAG Warning] 학칙 검색 실패: {e}")
     
-    # 실시간 컨텍스트(시간 인지) — main.py에서 KST로 계산된 값만 주입
     ctx_lines: list[str] = []
     if isinstance(current_context, dict) and current_context:
         now_kst = str(current_context.get("now_kst") or "").strip()
@@ -471,12 +442,10 @@ async def ask_ara(
     if ctx_lines:
         current_context_block = "## 현재 컨텍스트\n" + "\n".join(ctx_lines) + "\n\n"
     
-    # [RAG] 검색된 학칙 컨텍스트 추가
     rag_context_block = ""
     if university_context:
         rag_context_block = "## [Context] 한국해양대학교 학칙 및 규정\n" + university_context + "\n\n"
     else:
-        # 학칙 관련 질문인데 검색 결과가 없으면 거절 메시지 반환
         if any(kw in user_input for kw in ["학칙", "규정", "장학금", "등록금", "수강신청", "졸업", "휴학", "복학", "학사", "교칙"]):
             response_text = "학우님, 해당 내용은 현재 제가 보유한 학칙 데이터에서 확인이 어렵습니다. 정확한 확인을 위해 학교 본부 해당 부서에 문의하시길 정중히 권장드립니다."
             save_conversation_pair(
@@ -521,19 +490,19 @@ async def ask_ara(
             "- 공휴일/휴일/연휴/특정 날짜의 행사 여부 등 '날짜 기반' 정보는 절대 계산하거나 추측하지 마십시오.\n"
             "- 반드시 tools.py의 `get_calendar_day_2026` 또는 `get_astronomy_data`를 호출해 확인된 값만 사용하십시오.\n"
             "- 해당 날짜가 `calendar_2026.json`에 없거나 도구가 success가 아니면, 다음 문구로만 답하십시오:\n"
-            "  - Data is currently being updated for this specific date.\n\n"
+            "   - Data is currently being updated for this specific date.\n\n"
             "## 버튼 입력 우선 처리\n"
             "- 사용자가 버튼(퀵플라이)을 통해 입력한 메시지는 최우선적으로 해당 기능 호출 의도로 간주하십시오.\n"
             "- 예: '190번 버스 IN/OUT', '지금 학교 날씨 어때?', '영도 착한가격 식당 추천해줘'\n\n"
             "## 버스 안내 정책(Ocean View)\n"
             "- 사용자의 모호한 표현도 가능한 범위 내에서 스스로 해석하되, 추측은 금지합니다.\n"
             "- 버스 문의 시 OUT/IN 방향이 명시되지 않은 경우, 문맥으로 자동 추론합니다.\n"
-            "  - '등교', '학교 가자', 'in' -> IN(진입)\n"
-            "  - '하교', '부산역 가자', 'out' -> OUT(진출)\n"
+            "   - '등교', '학교 가자', 'in' -> IN(진입)\n"
+            "   - '하교', '부산역 가자', 'out' -> OUT(진출)\n"
             "- 버스 번호 없이 '버스'라고만 말하면, KMOU 핵심 노선인 190번을 기본값으로 상정합니다.\n"
             "- 그래도 불명확하면, '확인 불가'로 거절하지 말고 OUT/IN 중 무엇인지 정중히 되물으십시오.\n"
-            "  - OUT(진출): 구본관 -> 방파제입구 -> 승선생활관\n"
-            "  - IN(진입): 승선생활관 -> 대학본부 -> 구본관\n"
+            "   - OUT(진출): 구본관 -> 방파제입구 -> 승선생활관\n"
+            "   - IN(진입): 승선생활관 -> 대학본부 -> 구본관\n"
             "- 사용자가 OUT/IN을 명시하면 해당 동선 기준으로만 답하십시오.\n"
             "\n## 자가 최적화 지침(Self-Improvement)\n"
             "- 당신은 과거의 성공 사례를 참고하여 답변의 정확도와 유용성을 스스로 높여야 합니다.\n"
@@ -546,35 +515,13 @@ async def ask_ara(
         )
     }
     
-    # 과거 버전 태그 메시지는 제거하여 토큰 낭비를 줄입니다.
     messages = [system_prompt] + _strip_legacy_lang_tags(history) + [{"role": "user", "content": user_input}]
 
-   
-            messages.append(msg)
-            tasks = []
-            tools_used = []
-            for tc in msg.tool_calls:
-                func_name = tc.function.name
-                args = json.loads(tc.function.arguments)
-                if func_name in TOOL_MAP:
-                    tasks.append(TOOL_MAP[func_name](**args) if args else TOOL_MAP[func_name]())
-                    tools_used.append({"name": func_name, "arguments": args})
-            
-            results = await asyncio.gather(*tasks) try:
-  response = await client.chat.completions.create(
-    # 아래 따옴표 안에 복사한 ID를 정확히 붙여넣으세요 (콜론 2개 확인!)
-    model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb", 
-    messages=messages,
-    tools=TOOLS_SPEC,
-    tool_choice="auto",
-    temperature=0.0,
-)
-        msg = response.choices[0].message
-
-      try:
-        # 1차 호출: 모델에게 질문 (도구 사용 여부 판단)
+    # --- 핵심 수정 부분 (Indentation Fix & Logic) ---
+    try:
+        # 1차 호출: 모델에게 질문 (파인 튜닝 모델 ID 적용)
         response = await client.chat.completions.create(
-            model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb",  # ✅ 파인 튜닝 모델 ID
+            model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb",
             messages=messages,
             tools=TOOLS_SPEC,
             tool_choice="auto",
@@ -584,7 +531,7 @@ async def ask_ara(
 
         # 도구(Tools) 사용이 필요한 경우
         if msg.tool_calls:
-            messages.append(msg) # 대화 내역에 '도구 호출 요청' 추가
+            messages.append(msg)
             tasks = []
             tools_used = []
             
@@ -608,19 +555,33 @@ async def ask_ara(
                     "content": str(res)
                 })
 
-            # 2차 호출: 도구 결과를 바탕으로 최종 답변 생성
+            # 2차 호출: 도구 결과를 바탕으로 최종 답변 생성 (파인 튜닝 모델 ID 유지)
             final_res = await client.chat.completions.create(
-                model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb", # ✅ 여기도 파인 튜닝 모델 ID 필수!
+                model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb",
                 messages=messages,
                 temperature=0.0,
             )
-            # 최종 답변 텍스트 추출
             response_text = final_res.choices[0].message.content
 
         else:
-            # 도구를 사용하지 않은 경우 (일반 대화)
+            # 도구를 사용하지 않은 경우
             response_text = msg.content
 
     except Exception as e:
         print(f"[ARA Log] Agent Error: {e}")
-        return "죄송합니다. 시스템 처리 중 오류가 발생했습니다."
+        response_text = "죄송합니다. 시스템 처리 중 오류가 발생했습니다."
+
+    # --- 후처리 및 저장 ---
+    response_text = _sanitize_response_text_with_context(response_text, user_input)
+    save_conversation_pair(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        user_query=user_input,
+        ai_answer=response_text,
+        tools_used=tools_used if 'tools_used' in locals() else [],
+        user_feedback=0,
+        is_gold_standard=False,
+    )
+    if return_meta:
+        return {"content": response_text, "conversation_id": conversation_id}
+    return response_text
