@@ -549,17 +549,7 @@ async def ask_ara(
     # 과거 버전 태그 메시지는 제거하여 토큰 낭비를 줄입니다.
     messages = [system_prompt] + _strip_legacy_lang_tags(history) + [{"role": "user", "content": user_input}]
 
-    try:
-        response = await client.chat.completions.create(
-            model="ft:gpt-3.5-turbo-0125:personal:D0ovVHZb",
-            messages=messages,
-            tools=TOOLS_SPEC,
-            tool_choice="auto",
-            temperature=0.0,  # 환각 방지: temperature=0
-        )
-        msg = response.choices[0].message
-
-        if msg.tool_calls:
+   
             messages.append(msg)
             tasks = []
             tools_used = []
@@ -570,59 +560,67 @@ async def ask_ara(
                     tasks.append(TOOL_MAP[func_name](**args) if args else TOOL_MAP[func_name]())
                     tools_used.append({"name": func_name, "arguments": args})
             
+            results = await asyncio.gather(*tasks) try:
+  response = await client.chat.completions.create(
+    # 아래 따옴표 안에 복사한 ID를 정확히 붙여넣으세요 (콜론 2개 확인!)
+    model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb", 
+    messages=messages,
+    tools=TOOLS_SPEC,
+    tool_choice="auto",
+    temperature=0.0,
+)
+        msg = response.choices[0].message
+
+      try:
+        # 1차 호출: 모델에게 질문 (도구 사용 여부 판단)
+        response = await client.chat.completions.create(
+            model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb",  # ✅ 파인 튜닝 모델 ID
+            messages=messages,
+            tools=TOOLS_SPEC,
+            tool_choice="auto",
+            temperature=0.0,
+        )
+        msg = response.choices[0].message
+
+        # 도구(Tools) 사용이 필요한 경우
+        if msg.tool_calls:
+            messages.append(msg) # 대화 내역에 '도구 호출 요청' 추가
+            tasks = []
+            tools_used = []
+            
+            # 도구 함수 실행 준비
+            for tc in msg.tool_calls:
+                func_name = tc.function.name
+                args = json.loads(tc.function.arguments)
+                if func_name in TOOL_MAP:
+                    tasks.append(TOOL_MAP[func_name](**args) if args else TOOL_MAP[func_name]())
+                    tools_used.append({"name": func_name, "arguments": args})
+            
+            # 도구 병렬 실행
             results = await asyncio.gather(*tasks)
 
+            # 실행 결과를 대화 내역에 추가 (Role: tool)
             for tc, res in zip(msg.tool_calls, results):
                 messages.append({
-                    "tool_call_id": tc.id, "role": "tool", 
-                    "name": tc.function.name, "content": str(res)
+                    "tool_call_id": tc.id, 
+                    "role": "tool", 
+                    "name": tc.function.name, 
+                    "content": str(res)
                 })
 
+            # 2차 호출: 도구 결과를 바탕으로 최종 답변 생성
             final_res = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb", # ✅ 여기도 파인 튜닝 모델 ID 필수!
                 messages=messages,
-                temperature=0.0,  # 환각 방지: temperature=0
+                temperature=0.0,
             )
-            response_text = _sanitize_response_text_with_context(final_res.choices[0].message.content, user_input)
-            if user_id:
-                try:
-                    new_history = (history or []) + [{"role": "user", "content": user_input}, {"role": "assistant", "content": response_text}]
-                    _save_history_trim(user_id, new_history, limit=25)
-                except Exception:
-                    pass
-            save_conversation_pair(
-                conversation_id=conversation_id,
-                user_id=user_id,
-                user_query=user_input,
-                ai_answer=response_text,
-                tools_used=tools_used,
-                user_feedback=0,
-                is_gold_standard=False,
-            )
-            if return_meta:
-                return {"content": response_text, "conversation_id": conversation_id}
-            return response_text
-        
-        response_text = _sanitize_response_text_with_context(msg.content, user_input)
-        if user_id:
-            try:
-                new_history = (history or []) + [{"role": "user", "content": user_input}, {"role": "assistant", "content": response_text}]
-                _save_history_trim(user_id, new_history, limit=25)
-            except Exception:
-                pass
-        save_conversation_pair(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            user_query=user_input,
-            ai_answer=response_text,
-            tools_used=[],
-            user_feedback=0,
-            is_gold_standard=False,
-        )
-        if return_meta:
-            return {"content": response_text, "conversation_id": conversation_id}
-        return response_text
+            # 최종 답변 텍스트 추출
+            response_text = final_res.choices[0].message.content
+
+        else:
+            # 도구를 사용하지 않은 경우 (일반 대화)
+            response_text = msg.content
 
     except Exception as e:
         print(f"[ARA Log] Agent Error: {e}")
-        return "죄송합니다. 시스템 과부하로 인해 답변을 드리기 어렵습니다."
+        return "죄송합니다. 시스템 처리 중 오류가 발생했습니다."
