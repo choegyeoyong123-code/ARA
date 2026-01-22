@@ -3,6 +3,7 @@ import json
 import asyncio
 import re
 import uuid
+import inspect
 from typing import Any, Optional, Dict
 from openai import AsyncOpenAI
 from tools import (
@@ -535,15 +536,32 @@ async def ask_ara(
             tasks = []
             tools_used = []
             
-            # 도구 함수 실행 준비
+            # 도구 함수 실행 준비 (동기/비동기 혼용 처리)
             for tc in msg.tool_calls:
                 func_name = tc.function.name
                 args = json.loads(tc.function.arguments)
                 if func_name in TOOL_MAP:
-                    tasks.append(TOOL_MAP[func_name](**args) if args else TOOL_MAP[func_name]())
+                    func = TOOL_MAP[func_name]
+                    
+                    # 함수가 비동기인지 확인 (함수 호출 전에 확인)
+                    if inspect.iscoroutinefunction(func):
+                        # 비동기 함수: coroutine을 생성하여 tasks에 추가
+                        coro = func(**args) if args else func()
+                        tasks.append(coro)
+                    else:
+                        # 동기 함수: 결과를 즉시 실행하고 awaitable로 래핑
+                        sync_result = func(**args) if args else func()
+                        # closure 문제 방지: 각 값을 개별적으로 래핑
+                        # 즉시 실행 함수 패턴으로 각 반복마다 새로운 closure 생성
+                        def create_awaitable(value):
+                            async def wrapper():
+                                return value
+                            return wrapper()
+                        tasks.append(create_awaitable(sync_result))
+                    
                     tools_used.append({"name": func_name, "arguments": args})
             
-            # 도구 병렬 실행
+            # 도구 병렬 실행 (모든 tasks는 이제 awaitable)
             results = await asyncio.gather(*tasks)
 
             # 실행 결과를 대화 내역에 추가 (Role: tool)
