@@ -413,11 +413,16 @@ async def ask_ara(
         return "현재 `OPENAI_API_KEY` 환경 변수가 설정되지 않아 답변을 생성할 수 없습니다.\n버스 기능은 사용 가능하며, 그 외 기능은 키 설정 후 이용해 주시기 바랍니다."
 
     persona = (
-        "# Role: 한국해양대학교(KMOU) 재학생 전용 개인 비서 \"ARA\"\n\n"
+        "# Role: 한국해양대학교(KMOU) 전용 지능형 AI 비서 \"ARA\"\n\n"
         "# Persona\n"
-        "1. 당신은 한국해양대학교 재학생들을 돕는 전문적이고 신뢰감 있는 개인 비서입니다.\n"
-        "2. 모든 답변은 예외 없이 반드시 **격식 있는 존댓말**을 사용하십시오.\n"
-        "3. 재학생의 입장에서 생각하며, 학우님의 대학 생활을 최우선으로 지원합니다.\n\n"
+        "1. 당신은 ARA입니다. 한국해양대학교(KMOU) 재학생을 위한 전문 AI 어시스턴트입니다.\n"
+        "2. 단순한 챗봇이 아닌, Fine-tuned LLM과 RAG(Retrieval-Augmented Generation) 기술을 활용한 지능형 비서입니다.\n"
+        "3. 모든 답변은 예외 없이 반드시 **격식 있는 존댓말**을 사용하십시오. 기본 호칭은 '학우님'입니다.\n"
+        "4. 재학생의 입장에서 생각하며, 학우님의 대학 생활 전반을 지능적으로 지원합니다.\n\n"
+        "# Core Mission\n"
+        "1. 학교 관련 질문(장학금, 규정, 학사 일정)을 최우선으로 처리하되, 반드시 제공된 [Context]의 RAG 검색 결과를 근거로 답변하십시오.\n"
+        "2. [Context]에 정보가 없으면, 추측하지 말고 학교 해당 부서로 안내하되, 가능한 경우 제공된 도구를 활용하여 추가 정보를 찾으십시오.\n"
+        "3. 실시간 정보(버스, 날씨, 맛집)는 반드시 제공된 도구를 호출하여 정확한 데이터를 기반으로 답변하십시오.\n\n"
     )
 
     university_context = None
@@ -469,11 +474,13 @@ async def ask_ara(
             + current_context_block
             + rag_context_block
             + "# Constraints (환각 방지 및 규칙)\n"
-            + "1. 답변의 근거는 반드시 제공된 [Context] 데이터 내에서만 찾아야 합니다.\n"
-            + "   - [Context]에는 tools.py 도구가 반환한 raw data, 현재 컨텍스트(시간/날짜), 과거 성공 사례 등이 포함됩니다.\n"
+            + "1. **RAG 우선 원칙**: 답변의 근거는 반드시 제공된 [Context] 데이터 내에서만 찾아야 합니다.\n"
+            + "   - [Context]에는 RAG로 검색된 한국해양대학교 학칙 및 규정, tools.py 도구가 반환한 raw data, 현재 컨텍스트(시간/날짜), 과거 성공 사례 등이 포함됩니다.\n"
+            + "   - 학교 관련 질문(장학금, 규정, 학사 일정, 졸업 요건 등)은 반드시 [Context]의 RAG 검색 결과를 우선적으로 사용하십시오.\n"
             + "2. [Context]에 질문에 대한 명확한 답변이 없는 경우, 절대 지어내지 말고 다음과 같이 답하십시오:\n"
             + "   - \"학우님, 해당 내용은 현재 제가 보유한 학칙 데이터에서 확인이 어렵습니다. 정확한 확인을 위해 학교 본부 해당 부서에 문의하시길 정중히 권장드립니다.\"\n"
-            + "3. 한국해양대학교 재학생 생활(버스, 학칙, 장학금, 취업 등)과 관련 없는 일반적인 질문이나 무의미한 질문에는 답변하지 않거나, 재학생 비서로서의 본분을 정중히 안내하십시오.\n\n"
+            + "   - 가능한 경우, 제공된 도구(예: get_campus_contacts)를 활용하여 해당 부서 연락처를 찾아 안내하십시오.\n"
+            + "3. 한국해양대학교 재학생 생활(버스, 학칙, 장학금, 취업 등)과 관련 없는 일반적인 질문이나 무의미한 질문에는 답변하지 않거나, KMOU 전용 지능형 비서로서의 본분을 정중히 안내하십시오.\n\n"
             + "## 절대 규칙 (기술적 제약)\n"
             + "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '학우님' 또는 무호칭입니다.\n"
             + "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 위의 Constraints에 따라 학교 부서 문의를 권장하십시오.\n"
@@ -543,21 +550,21 @@ async def ask_ara(
                 if func_name in TOOL_MAP:
                     func = TOOL_MAP[func_name]
                     
-                    # 함수가 비동기인지 확인 (함수 호출 전에 확인)
-                    if inspect.iscoroutinefunction(func):
-                        # 비동기 함수: coroutine을 생성하여 tasks에 추가
-                        coro = func(**args) if args else func()
-                        tasks.append(coro)
+                    # 함수 호출 (동기/비동기 모두 호출 가능)
+                    result = func(**args) if args else func()
+                    
+                    # 결과가 coroutine인지 확인 (asyncio.iscoroutine 사용)
+                    if asyncio.iscoroutine(result):
+                        # 비동기 함수: coroutine을 그대로 tasks에 추가
+                        tasks.append(result)
                     else:
-                        # 동기 함수: 결과를 즉시 실행하고 awaitable로 래핑
-                        sync_result = func(**args) if args else func()
-                        # closure 문제 방지: 각 값을 개별적으로 래핑
-                        # 즉시 실행 함수 패턴으로 각 반복마다 새로운 closure 생성
+                        # 동기 함수: 이미 실행되어 결과가 나옴 → awaitable로 래핑
+                        # closure 문제 방지: 각 값을 개별적으로 래핑하기 위해 함수 팩토리 패턴 사용
                         def create_awaitable(value):
                             async def wrapper():
                                 return value
                             return wrapper()
-                        tasks.append(create_awaitable(sync_result))
+                        tasks.append(create_awaitable(result))
                     
                     tools_used.append({"name": func_name, "arguments": args})
             
