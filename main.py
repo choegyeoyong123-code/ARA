@@ -3,6 +3,7 @@ import os
 import logging
 import json
 import traceback
+from typing import Optional
 
 # ==========================================
 # 1. [Render 배포용] SQLite 버전 패치
@@ -118,6 +119,31 @@ def _extract_user_utterance(payload: dict) -> str:
 
     return "내용 없음"
 
+def _extract_image_url(payload: dict) -> Optional[str]:
+    """
+    카카오톡 요청 payload에서 이미지 URL을 추출합니다.
+    """
+    # 1. userRequest.message.photo.url
+    photo = payload.get("userRequest", {}).get("message", {}).get("photo")
+    if photo and isinstance(photo, dict):
+        url = photo.get("url")
+        if url:
+            return url
+    
+    # 2. action.params.image_url
+    action_params = payload.get("action", {}).get("params", {})
+    if "image_url" in action_params:
+        return action_params["image_url"]
+    
+    # 3. userRequest.message.photo.url (다른 경로)
+    message = payload.get("userRequest", {}).get("message", {})
+    if isinstance(message, dict) and "photo" in message:
+        photo_obj = message["photo"]
+        if isinstance(photo_obj, dict) and "url" in photo_obj:
+            return photo_obj["url"]
+    
+    return None
+
 # ==========================================
 # 메인 메시지 처리 핸들러
 # ==========================================
@@ -137,9 +163,14 @@ async def message(request: Request):
         user_utterance = _extract_user_utterance(payload)
         logger.info(f"📥 [User Input] 발화: {user_utterance}")
         
+        # 2-1. 이미지 URL 추출 (OCR 처리용)
+        image_url = _extract_image_url(payload)
+        if image_url:
+            logger.info(f"📷 [Image] 이미지 URL 발견: {image_url}")
+        
         # 3. [핵심] Agent 로직 호출 (비동기 await 필수!)
         # agent.py의 process_query가 async def로 정의되었으므로 반드시 await를 써야 합니다.
-        response = await process_query(user_utterance)
+        response = await process_query(user_utterance, image_url=image_url)
         
         # 4. 응답 검증 (Dict 타입 확인)
         if not isinstance(response, dict):
