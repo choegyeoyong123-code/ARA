@@ -668,6 +668,14 @@ async def ask_ara(
     if callback_url:
         try:
             import httpx
+            # 면책 조항 추가 (agent.py를 통한 정보성 답변이므로)
+            DISCLAIMER_TEXT = (
+                "\n\n---\n"
+                "⚠️ [면책 고지] 본 답변은 AI가 실시간으로 수집·요약한 정보로 부정확할 수 있습니다. "
+                "법적 효력이 없으므로 중요 사항은 반드시 학교 홈페이지를 교차 확인하시기 바랍니다."
+            )
+            final_response_text = response_text + DISCLAIMER_TEXT
+            
             # Kakao SkillResponse v2.0 형식 준수
             callback_payload = {
                 "version": "2.0",
@@ -675,7 +683,7 @@ async def ask_ara(
                     "outputs": [
                         {
                             "simpleText": {
-                                "text": response_text
+                                "text": final_response_text
                             }
                         }
                     ]

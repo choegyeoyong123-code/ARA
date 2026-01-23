@@ -1,27 +1,27 @@
 import sys
 import os
 
-# ==========================================
-# [Render 배포용] SQLite 버전 패치 (ChromaDB 호환)
-# 설명: 리눅스 환경의 구버전 SQLite를 pysqlite3로 강제 교체합니다.
-# ==========================================
+# ---------------------------------------------------------
+# [Render 배포용 패치] pysqlite3-binary 적용
+# 목적: 리눅스 서버의 구버전 SQLite 문제를 해결하여 ChromaDB 구동
+# ---------------------------------------------------------
 try:
     __import__('pysqlite3')
     sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 except ImportError:
-    # 로컬(Windows) 환경이거나 pysqlite3가 없으면 패스
+    # 로컬(Windows/Mac) 개발 환경에서는 패스
     pass
 
-# ==========================================
-# 환경 변수 로드 (.env)
-# ==========================================
+# ---------------------------------------------------------
+# 환경 변수 및 라이브러리 로드
+# ---------------------------------------------------------
 from dotenv import load_dotenv
 load_dotenv()
 
-# ------------------------------------------
-# [주의] 이 아래부터 다른 모듈을 import 하세요.
-# 예: import httpx, from fastapi import ...
-# ------------------------------------------
+# 👇 이 아래부터 다른 모든 import를 작성하세요 (순서 중요!)
+# import uvicorn
+# from fastapi import FastAPI
+# ...
 
 import asyncio
 import contextvars
@@ -512,6 +512,13 @@ def _add_feedback_buttons(buttons: list[dict] | None, conversation_id: str | Non
     
     return buttons
 
+# 면책 조항 텍스트
+DISCLAIMER_TEXT = (
+    "\n\n---\n"
+    "⚠️ [면책 고지] 본 답변은 AI가 실시간으로 수집·요약한 정보로 부정확할 수 있습니다. "
+    "법적 효력이 없으므로 중요 사항은 반드시 학교 홈페이지를 교차 확인하시기 바랍니다."
+)
+
 def _kakao_basic_card(
     title: str,
     description: str,
@@ -520,7 +527,33 @@ def _kakao_basic_card(
     quick_replies: list[dict] | None = None,
     thumbnail_type: str = "Default",
     conversation_id: str | None = None,
+    add_disclaimer: bool = False,
 ):
+    """
+    카카오 BasicCard 응답 생성
+    
+    Args:
+        add_disclaimer: True이면 면책 조항을 description 끝에 추가 (agent.py를 통한 정보성 답변에만 사용)
+    """
+    # 면책 조항 추가 (agent.py를 통한 정보성 답변에만)
+    final_description = description
+    if add_disclaimer:
+        # Kakao BasicCard description 최대 길이: 450자
+        # 면책 조항 길이를 고려하여 원본 텍스트를 조정
+        disclaimer_len = len(DISCLAIMER_TEXT)
+        max_original_length = 450 - disclaimer_len
+        
+        if len(description) > max_original_length:
+            # 원본 텍스트가 너무 길면 자르고 말줄임표 추가
+            final_description = description[:max_original_length-3] + "..."
+        
+        # 면책 조항 추가
+        final_description += DISCLAIMER_TEXT
+        
+        # 최종 길이 확인 (안전장치)
+        if len(final_description) > 450:
+            final_description = final_description[:447] + "..."
+    
     # Mandatory thumbnail to prevent Kakao Error 2461
     # Use function-specific thumbnail if provided, else use type-based mapping
     if thumbnail:
@@ -534,7 +567,7 @@ def _kakao_basic_card(
     
     card: dict = {
         "title": title,
-        "description": description,
+        "description": final_description,
         "thumbnail": thumb_dict
     }
     if final_buttons:
@@ -1774,11 +1807,14 @@ async def kakao_endpoint(request: Request, background_tasks: BackgroundTasks):
         
         # 카드 UI 강제: LLM 응답도 basicCard/listCard로만 래핑
         # 피드백 버튼 포함 (conversation_id 전달)
+        # 면책 조항 추가 (agent.py를 통한 정보성 답변이므로 add_disclaimer=True)
+        # 주의: _normalize_desc는 면책 조항 추가 전에 호출 (면책 조항은 _kakao_basic_card 내부에서 추가됨)
         return _kakao_basic_card(
             title="ARA 답변",
             description=_normalize_desc(response_text),
             buttons=[{"action": "message", "label": "다시 질문", "messageText": "다시 질문"}],
             conversation_id=conversation_id,
+            add_disclaimer=True,  # agent.py를 통한 정보성 답변이므로 면책 조항 추가
         )
 
     except Exception as e:
