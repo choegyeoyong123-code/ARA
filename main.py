@@ -6,15 +6,13 @@
 # 이 코드는 load_dotenv()보다 반드시 먼저 실행되어야 함
 import os
 import sys
-
+import sys  # <--- [핵심] 이 줄이 없으면 에러가 납니다!
 try:
-    import pysqlite3
-    # pysqlite3를 sqlite3로 교체 (ChromaDB 호환성)
-    sys.modules['sqlite3'] = sys.modules['pysqlite3']
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 except ImportError:
-    # pysqlite3가 없으면 기본 sqlite3 사용
+    # pysqlite3-binary가 설치되지 않은 로컬 환경(윈도우 등)을 위한 예외 처리
     pass
-
 # =========================
 # 환경 변수 로드
 # =========================

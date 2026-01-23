@@ -5,13 +5,20 @@
 - 우아한 실패: 크래시 없이 친절한 안내 문구 저장
 """
 
-import cloudscraper
 import os
+import sys  # <--- [중요] 아까 에러를 해결하는 핵심 열쇠입니다!
 import time
 import random
-from pathlib import Path
-from bs4 import BeautifulSoup
 import logging
+from pathlib import Path
+
+# 외부 라이브러리
+import cloudscraper
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+# 환경 변수 로드
+load_dotenv()
 
 # 로깅 설정
 logging.basicConfig(
@@ -524,40 +531,51 @@ def collect_university_info(target_url: str, filename: str) -> bool:
 # =========================
 
 if __name__ == "__main__":
-    logger.info("=" * 60)
-    logger.info("방탄 모드 데이터 수집기 시작")
-    logger.info("=" * 60)
-    
-    # KMOU 게시판 목록
-    urls_to_crawl = {
-        "notice_general": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2032&bbsId=10373",
-        "academic_guide": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2033&bbsId=11786",
-        "scholarship_guide": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=5691&bbsId=10004365",
-        "events_seminar": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2034&bbsId=10375",
-        "cafeteria_menu": "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"
-    }
-    
-    success_count = 0
-    total_count = len(urls_to_crawl)
-    
-    for name, url in urls_to_crawl.items():
-        try:
-            if collect_university_info(url, name):
-                success_count += 1
-        except Exception as e:
-            logger.error(f"[{name}] 예상치 못한 오류: {e}")
-            # 파일 경로 설정 및 안내 문구 저장
-            file_path = data_dir / f"{name}.txt"
-            save_fallback_message(file_path, url)
+    try:
+        logger.info("=" * 60)
+        logger.info("방탄 모드 데이터 수집기 시작")
+        logger.info("=" * 60)
         
-        # 요청 사이 랜덤 딜레이 (인간의 접속 패턴 모사)
-        if name != list(urls_to_crawl.keys())[-1]:  # 마지막 항목이 아니면
-            delay = random.uniform(1, 3)
-            logger.info(f"다음 요청 전 대기: {delay:.2f}초")
-            time.sleep(delay)
-    
-    logger.info("=" * 60)
-    logger.info(f"수집 작업 완료: {success_count}/{total_count} 성공")
-    logger.info("=" * 60)
-    print(f"\n🚀 모든 수집 작업이 끝났습니다. (성공: {success_count}/{total_count})")
-    print("이제 ingest.py를 실행해 보세요!")
+        # KMOU 게시판 목록
+        urls_to_crawl = {
+            "notice_general": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2032&bbsId=10373",
+            "academic_guide": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2033&bbsId=11786",
+            "scholarship_guide": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=5691&bbsId=10004365",
+            "events_seminar": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2034&bbsId=10375",
+            "cafeteria_menu": "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"
+        }
+        
+        success_count = 0
+        total_count = len(urls_to_crawl)
+        
+        for name, url in urls_to_crawl.items():
+            try:
+                if collect_university_info(url, name):
+                    success_count += 1
+            except Exception as e:
+                logger.error(f"[{name}] 예상치 못한 오류: {e}")
+                # 파일 경로 설정 및 안내 문구 저장
+                file_path = data_dir / f"{name}.txt"
+                save_fallback_message(file_path, url)
+            
+            # 요청 사이 랜덤 딜레이 (인간의 접속 패턴 모사)
+            if name != list(urls_to_crawl.keys())[-1]:  # 마지막 항목이 아니면
+                delay = random.uniform(1, 3)
+                logger.info(f"다음 요청 전 대기: {delay:.2f}초")
+                time.sleep(delay)
+        
+        logger.info("=" * 60)
+        logger.info(f"수집 작업 완료: {success_count}/{total_count} 성공")
+        logger.info("=" * 60)
+        print(f"\n🚀 모든 수집 작업이 끝났습니다. (성공: {success_count}/{total_count})")
+        print("이제 ingest.py를 실행해 보세요!")
+        
+    except Exception as e:
+        # 전체 프로그램이 크래시되지 않도록 최상위 예외 처리
+        logger.error(f"치명적 오류 발생: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        print(f"\n⚠️ 수집 작업 중 오류가 발생했습니다: {e}")
+        print("로그 파일(collector.log)을 확인해주세요.")
+        # Exit code 0으로 정상 종료 (서버 실행이 막히지 않도록)
+        sys.exit(0)
