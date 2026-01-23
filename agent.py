@@ -702,3 +702,104 @@ async def ask_ara(
     if return_meta:
         return {"content": response_text, "conversation_id": conversation_id}
     return response_text
+
+# ==========================================
+# process_query 함수: 카카오톡 JSON 형식 반환
+# ==========================================
+async def process_query(user_utterance: str, user_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    카카오톡 요청을 처리하고 JSON 형식으로 반환합니다.
+    
+    Args:
+        user_utterance: 사용자 발화
+        user_id: 사용자 ID (선택)
+    
+    Returns:
+        카카오톡 SkillResponse v2.0 형식의 딕셔너리
+    """
+    # 면책 조항 텍스트
+    DISCLAIMER_TEXT = (
+        "\n\n---\n"
+        "⚠️ [면책 고지] 본 답변은 AI가 실시간으로 수집·요약한 정보로 부정확할 수 있습니다. "
+        "법적 효력이 없으므로 중요 사항은 반드시 학교 홈페이지를 교차 확인하시기 바랍니다."
+    )
+    
+    try:
+        # 입력 검증
+        if not user_utterance or not isinstance(user_utterance, str):
+            user_utterance = user_utterance or "안녕하세요"
+            print(f"[process_query] 경고: user_utterance가 비어있거나 문자열이 아님: {type(user_utterance)}")
+        
+        print(f"[process_query] 시작: user_utterance='{user_utterance[:50]}...', user_id={user_id}")
+        
+        # ask_ara 호출하여 응답 텍스트 받기
+        result = await ask_ara(
+            user_input=user_utterance,
+            user_id=user_id,
+            return_meta=False,
+            session_lang="ko"
+        )
+        
+        print(f"[process_query] ask_ara 결과 타입: {type(result)}")
+        
+        # result가 문자열인지 확인
+        if isinstance(result, str):
+            response_text = result.strip()
+        elif isinstance(result, dict):
+            # return_meta=True인 경우 dict 반환
+            response_text = result.get("content", str(result))
+            if isinstance(response_text, str):
+                response_text = response_text.strip()
+            else:
+                response_text = str(response_text)
+        elif result is None:
+            response_text = "죄송합니다. 응답을 생성할 수 없습니다."
+            print(f"[process_query] 경고: ask_ara가 None을 반환함")
+        else:
+            response_text = str(result).strip() if result else "응답을 생성할 수 없습니다."
+            print(f"[process_query] 경고: 예상치 못한 반환 타입: {type(result)}")
+        
+        # 빈 문자열 처리
+        if not response_text or len(response_text.strip()) == 0:
+            response_text = "죄송합니다. 응답을 생성할 수 없습니다."
+            print(f"[process_query] 경고: response_text가 비어있음")
+        
+        # 면책 조항 추가 (문자열에 문자열을 더함 - 올바른 방법)
+        final_text = response_text + DISCLAIMER_TEXT
+        
+        # 카카오톡 JSON 형식으로 반환 (딕셔너리 형태)
+        response_dict = {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": final_text
+                        }
+                    }
+                ]
+            }
+        }
+        
+        print(f"[process_query] 성공: 응답 길이={len(final_text)}자")
+        return response_dict
+        
+    except Exception as e:
+        # 에러 발생 시에도 올바른 JSON 형식으로 반환
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[process_query] 예외 발생: {e}\n{error_trace}")
+        
+        error_text = f"죄송합니다. 처리 중 오류가 발생했습니다: {str(e)}"
+        return {
+            "version": "2.0",
+            "template": {
+                "outputs": [
+                    {
+                        "simpleText": {
+                            "text": error_text
+                        }
+                    }
+                ]
+            }
+        }
