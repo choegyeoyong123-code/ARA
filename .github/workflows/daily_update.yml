@@ -39,5 +39,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add university_data/ university_db/
-          git commit -m "Auto-update: Latest KMOU Data $(date +'%Y-%m-%d')" || exit 0
-          git push
+          
+          # 변경사항 확인 후 pull(rebase) 수행 후 push
+          git diff --quiet && git diff --staged --quiet || (
+            git pull --rebase origin main && 
+            git commit -m "Auto-update: Latest KMOU Data $(date +'%Y-%m-%d')" && 
+            git push
+          )
