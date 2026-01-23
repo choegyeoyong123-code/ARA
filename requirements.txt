@@ -1,19 +1,14 @@
-﻿# --- Core Framework ---
-fastapi
+﻿fastapi
 uvicorn
 python-dotenv
 jinja2
 python-multipart
-
-# --- HTTP & Scraping ---
 httpx
 requests
 beautifulsoup4
 lxml
 xmltodict
-cloudscraper>=1.2.71
-
-# --- AI & Logic ---
+cloudscraper
 openai
 langchain
 langchain-openai
@@ -21,12 +16,7 @@ langchain-community
 langchain-core
 tiktoken
 rapidfuzz
-
-# --- Database & Vector Store ---
 chromadb
 pysqlite3-binary
-
-# --- Utilities ---
-pytz
-numpy
 pandas
+numpy
