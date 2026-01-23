@@ -64,18 +64,41 @@ LATEST_CHROME_UA = (
 # =========================
 
 def create_scraper_session():
+    """
+    보안 우회 강화된 CloudScraper 세션 생성
+    - 최신 Chrome 브라우저 모사
+    - 쿠키 및 세션 유지
+    - 자동 챌린지 우회
+    """
     try:
         scraper = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
                 'platform': 'windows',
-                'mobile': False
+                'mobile': False,
+                'desktop': True
             },
-            delay=random.uniform(1, 2)
+            delay=random.uniform(1.5, 3.0),  # 딜레이 증가 (인간 패턴)
+            debug=False
         )
+        
+        # 추가 헤더 설정 (브라우저 모사 강화)
+        scraper.headers.update({
+            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Cache-Control': 'max-age=0',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+        })
+        
+        logger.info("✅ CloudScraper 세션 생성 완료 (보안 우회 활성화)")
         return scraper
     except Exception as e:
-        logger.error(f"CloudScraper 세션 생성 실패: {e}")
+        logger.error(f"❌ CloudScraper 세션 생성 실패: {e}")
         return None
 
 # 전역 세션 (실패 시 None)
@@ -124,28 +147,76 @@ def save_fallback_message(file_path: Path, url: str = None):
 # =========================
 
 def safe_request(url: str, filename: str):
+    """
+    보안 우회 강화된 안전한 요청 함수
+    - Cloudflare 챌린지 우회
+    - 세션 쿠키 유지
+    - 계층적 예외 처리
+    """
     if scraper_session is None:
         return None
 
     headers = get_headers()
     
-    # 최대 2회 재시도
-    for attempt in range(2):
+    # 최대 3회 재시도 (보안 우회 강화)
+    for attempt in range(3):
         try:
             if attempt > 0:
-                time.sleep(random.uniform(2, 4))
+                # 재시도 시 더 긴 딜레이 (인간 패턴 모사)
+                delay = random.uniform(3, 6)
+                logger.info(f"[{filename}] 재시도 {attempt}회 - {delay:.1f}초 대기...")
+                time.sleep(delay)
             
-            response = scraper_session.get(url, headers=headers, timeout=15) # 타임아웃 단축 (서버 지연 방지)
+            # 요청 전 랜덤 딜레이 (인간 패턴)
+            if attempt == 0:
+                time.sleep(random.uniform(1, 3))
+            
+            # CloudScraper로 요청 (자동 챌린지 우회)
+            response = scraper_session.get(
+                url, 
+                headers=headers, 
+                timeout=20,  # 타임아웃 증가
+                allow_redirects=True
+            )
             
             if response.status_code == 200:
+                # 응답 크기 확인 (너무 작으면 의심)
+                if len(response.text) < 100:
+                    logger.warning(f"[{filename}] 응답이 너무 짧습니다 ({len(response.text)}자)")
+                    if attempt < 2:  # 마지막 시도가 아니면 재시도
+                        continue
+                
                 return response
             elif response.status_code in [403, 404]:
                 logger.warning(f"[{filename}] HTTP {response.status_code}")
                 return None
+            elif response.status_code == 429:  # Too Many Requests
+                logger.warning(f"[{filename}] Rate Limit - 더 긴 대기 후 재시도")
+                if attempt < 2:
+                    time.sleep(random.uniform(10, 15))
+                    continue
+                return None
             
         except Exception as e:
-            logger.error(f"[{filename}] 요청 실패: {e}")
-            continue
+            error_type = type(e).__name__
+            if "CloudflareChallengeError" in error_type or "Challenge" in str(e):
+                logger.error(f"[{filename}] Cloudflare 챌린지 실패: {e}")
+                if attempt < 2:
+                    # 챌린지 실패 시 더 긴 대기
+                    time.sleep(random.uniform(5, 10))
+                    continue
+            elif "Timeout" in error_type:
+                logger.error(f"[{filename}] 타임아웃: {e}")
+                if attempt < 2:
+                    continue
+            elif "AttributeError" in error_type or "IndexError" in error_type:
+                logger.error(f"[{filename}] 파싱 오류: {e}")
+                # 파싱 오류는 재시도 불필요
+                return None
+            else:
+                logger.error(f"[{filename}] 요청 실패 ({error_type}): {e}")
+                if attempt < 2:
+                    continue
             
     return None
 
@@ -154,24 +225,67 @@ def safe_request(url: str, filename: str):
 # =========================
 
 def collect_and_save(url: str, filename: str):
+    """
+    보안 우회 강화된 데이터 수집 함수
+    - 계층적 예외 처리
+    - 우아한 실패 처리
+    """
     file_path = data_dir / f"{filename}.txt"
     
     try:
         response = safe_request(url, filename)
         
         if response and len(response.text) > 100:
-            # HTML 파싱 (BeautifulSoup)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            content = soup.get_text(separator='\n', strip=True)
-            
-            if len(content) > 50:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-                logger.info(f"✅ [{filename}] 저장 성공")
-                return True
+            try:
+                # HTML 파싱 (BeautifulSoup) - lxml 파서 사용 (더 빠르고 안정적)
+                soup = BeautifulSoup(response.text, 'lxml')
+                
+                # 스크립트, 스타일 태그 제거 (노이즈 제거)
+                for script in soup(["script", "style", "meta", "link"]):
+                    script.decompose()
+                
+                # 텍스트 추출
+                content = soup.get_text(separator='\n', strip=True)
+                
+                # 빈 줄 제거 및 정리
+                lines = [line.strip() for line in content.split('\n') if line.strip()]
+                content = '\n'.join(lines)
+                
+                if len(content) > 50:
+                    # 폴더 생성 (안전장치)
+                    file_path.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    logger.info(f"✅ [{filename}] 저장 성공 ({len(content)}자)")
+                    return True
+                else:
+                    logger.warning(f"[{filename}] 추출된 내용이 너무 짧습니다 ({len(content)}자)")
+                    
+            except AttributeError as e:
+                logger.error(f"[{filename}] HTML 구조 파싱 오류: {e}")
+                # 파싱 오류는 특별 메시지 저장
+                if filename == "cafeteria_menu":
+                    fallback_msg = "식단 정보를 불러오는 중 오류가 발생했습니다."
+                else:
+                    fallback_msg = FALLBACK_MESSAGE
+                save_fallback_message(file_path, url)
+                return False
+            except IndexError as e:
+                logger.error(f"[{filename}] 인덱스 오류 (HTML 구조 변경): {e}")
+                save_fallback_message(file_path, url)
+                return False
+            except Exception as e:
+                logger.error(f"[{filename}] 파싱 중 예상치 못한 오류: {e}")
+                save_fallback_message(file_path, url)
+                return False
+        else:
+            logger.warning(f"[{filename}] 응답이 없거나 너무 짧습니다")
                 
     except Exception as e:
-        logger.error(f"[{filename}] 처리 중 오류: {e}")
+        logger.error(f"[{filename}] 처리 중 치명적 오류: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
 
     # 실패 시 안내 문구 저장
     save_fallback_message(file_path, url)
@@ -196,8 +310,12 @@ def main():
     }
 
     for name, url in urls.items():
+        logger.info(f"📥 [{name}] 수집 시작: {url}")
         collect_and_save(url, name)
-        time.sleep(1) # 부하 방지
+        # 인간 패턴 모사: 각 요청 사이 랜덤 딜레이
+        delay = random.uniform(2, 4)
+        time.sleep(delay)
+        logger.info(f"⏸️ [{name}] {delay:.1f}초 대기 완료")
 
     print("✅ [Collector] 모든 작업 완료. 정상 종료합니다.")
 
