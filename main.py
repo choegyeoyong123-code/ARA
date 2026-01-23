@@ -1,4 +1,23 @@
+# =========================
+# SQLite 버전 패치 (Render 배포 호환성)
+# =========================
+# [중요] Render 등 리눅스 환경에서 구버전 SQLite 문제 해결을 위한 패치
+# pysqlite3를 시도하고, 성공하면 시스템의 sqlite3 모듈을 pysqlite3로 교체
+# 이 코드는 load_dotenv()보다 반드시 먼저 실행되어야 함
 import os
+import sys
+
+try:
+    import pysqlite3
+    # pysqlite3를 sqlite3로 교체 (ChromaDB 호환성)
+    sys.modules['sqlite3'] = sys.modules['pysqlite3']
+except ImportError:
+    # pysqlite3가 없으면 기본 sqlite3 사용
+    pass
+
+# =========================
+# 환경 변수 로드
+# =========================
 from dotenv import load_dotenv
 
 # .env 환경 변수 로드 (모든 커스텀 모듈 import 이전에 실행되어야 함)
@@ -1774,3 +1793,14 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
+
+# =========================
+# Render 배포 시 Start Command 안내
+# =========================
+# 이 수정 후에는 Render의 Start Command를 다음과 같이 변경해야 합니다:
+# python collector.py && python ingest.py && uvicorn main:app --host 0.0.0.0 --port $PORT
+#
+# 위 명령어는 다음 순서로 실행됩니다:
+# 1. collector.py: 학교 홈페이지에서 데이터 수집
+# 2. ingest.py: 수집된 데이터를 벡터 DB에 인덱싱
+# 3. uvicorn: FastAPI 서버 시작

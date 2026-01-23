@@ -111,3 +111,5 @@ yarl==1.22.0
 zstandard==0.25.0
 httpx>=0.25.0
 cloudscraper>=1.2.71
+pysqlite3-binary
+chromadb
