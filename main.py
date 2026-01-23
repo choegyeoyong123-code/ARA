@@ -3,7 +3,7 @@ import os
 
 # SQLite 버전 패치 (Render 배포 호환성)
 try:
-    import pysqlite3
+    import pysqlite3  # pyright: ignore[reportMissingImports]
     sys.modules['sqlite3'] = pysqlite3
 except ImportError:
     pass
