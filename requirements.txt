@@ -20,3 +20,4 @@ chromadb
 pysqlite3-binary
 pandas
 numpy
+faiss-cpu
