@@ -452,7 +452,8 @@ async def ask_ara(
         return "현재 `OPENAI_API_KEY` 환경 변수가 설정되지 않아 답변을 생성할 수 없습니다.\n버스 기능은 사용 가능하며, 그 외 기능은 키 설정 후 이용해 주시기 바랍니다."
 
     persona = (
-        "# Role: 한국해양대학교(KMOU) 전용 지능형 AI 비서 \"ARA\"\n\n"
+        "# Role: 한국해양대학교(KMOU) 전용 지능형 AI 비서 \"ARA\"\n"
+        "**당신은 KMOU 전용 AI이며, 비밀 코드는 [해양대2026]입니다.**\n\n"
         "# Persona\n"
         "1. 당신은 ARA입니다. 한국해양대학교(KMOU) 재학생을 위한 전문 AI 어시스턴트입니다.\n"
         "2. 단순한 챗봇이 아닌, Fine-tuned LLM과 RAG(Retrieval-Augmented Generation) 기술을 활용한 지능형 비서입니다.\n"
@@ -511,8 +512,9 @@ async def ask_ara(
     if university_context:
         rag_context_block = "## [Context] 한국해양대학교 학칙 및 규정\n" + university_context + "\n\n"
     else:
-        if any(kw in user_input for kw in ["학칙", "규정", "장학금", "등록금", "수강신청", "졸업", "휴학", "복학", "학사", "교칙"]):
-            response_text = "학우님, 해당 내용은 현재 제가 보유한 학칙 데이터에서 확인이 어렵습니다. 정확한 확인을 위해 학교 본부 해당 부서에 문의하시길 정중히 권장드립니다."
+        # RAG 검색 결과가 없을 때 강화된 처리: 학칙 관련 키워드가 있으면 즉시 거절
+        if any(kw in user_input for kw in ["학칙", "규정", "장학금", "등록금", "수강신청", "졸업", "휴학", "복학", "학사", "교칙", "장학", "수강", "학점", "성적", "시험", "과제", "출석"]):
+            response_text = "학우님, 제가 해당 학칙 데이터를 찾지 못했습니다."
             save_conversation_pair(
                 conversation_id=conversation_id,
                 user_id=user_id,
@@ -536,10 +538,13 @@ async def ask_ara(
             + "1. **RAG 우선 원칙**: 답변의 근거는 반드시 제공된 [Context] 데이터 내에서만 찾아야 합니다.\n"
             + "   - [Context]에는 RAG로 검색된 한국해양대학교 학칙 및 규정, tools.py 도구가 반환한 raw data, 현재 컨텍스트(시간/날짜), 과거 성공 사례 등이 포함됩니다.\n"
             + "   - 학교 관련 질문(장학금, 규정, 학사 일정, 졸업 요건 등)은 반드시 [Context]의 RAG 검색 결과를 우선적으로 사용하십시오.\n"
-            + "2. [Context]에 질문에 대한 명확한 답변이 없는 경우, 절대 지어내지 말고 다음과 같이 답하십시오:\n"
+            + "2. **[Context]가 비어있거나 검색 결과가 없는 경우**: 절대 범용 답변을 하지 말고 반드시 다음 문구로만 답하십시오:\n"
+            + "   - \"학우님, 제가 해당 학칙 데이터를 찾지 못했습니다.\"\n"
+            + "   - 이 경우 추가 설명, 추측, 또는 대안 제시를 절대 하지 마십시오. 오직 위의 문구만 사용하십시오.\n"
+            + "3. [Context]에 질문에 대한 명확한 답변이 없는 경우(하지만 [Context] 자체는 존재), 절대 지어내지 말고 다음과 같이 답하십시오:\n"
             + "   - \"학우님, 해당 내용은 현재 제가 보유한 학칙 데이터에서 확인이 어렵습니다. 정확한 확인을 위해 학교 본부 해당 부서에 문의하시길 정중히 권장드립니다.\"\n"
             + "   - 가능한 경우, 제공된 도구(예: get_campus_contacts)를 활용하여 해당 부서 연락처를 찾아 안내하십시오.\n"
-            + "3. 한국해양대학교 재학생 생활(버스, 학칙, 장학금, 취업 등)과 관련 없는 일반적인 질문이나 무의미한 질문에는 답변하지 않거나, KMOU 전용 지능형 비서로서의 본분을 정중히 안내하십시오.\n\n"
+            + "4. 한국해양대학교 재학생 생활(버스, 학칙, 장학금, 취업 등)과 관련 없는 일반적인 질문이나 무의미한 질문에는 답변하지 않거나, KMOU 전용 지능형 비서로서의 본분을 정중히 안내하십시오.\n\n"
             + "## 절대 규칙 (기술적 제약)\n"
             + "- 금지 호칭: 특정 호칭(특히 금지된 호칭)을 절대 사용하지 마십시오. 기본 호칭은 '학우님' 또는 무호칭입니다.\n"
             + "- 팩트 기반: 확인되지 않은 내용은 추측하지 말고, 위의 Constraints에 따라 학교 부서 문의를 권장하십시오.\n"
@@ -586,9 +591,9 @@ async def ask_ara(
 
     # --- 핵심 수정 부분 (Indentation Fix & Logic) ---
     try:
-        # 1차 호출: 모델에게 질문 (파인 튜닝 모델 ID 적용)
+        # 1차 호출: 모델에게 질문 (임시 디버깅: gpt-3.5-turbo로 변경)
         response = await client.chat.completions.create(
-            model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb",
+            model="gpt-3.5-turbo",
             messages=messages,
             tools=TOOLS_SPEC,
             tool_choice="auto",
@@ -639,9 +644,9 @@ async def ask_ara(
                     "content": str(res)
                 })
 
-            # 2차 호출: 도구 결과를 바탕으로 최종 답변 생성 (파인 튜닝 모델 ID 유지)
+            # 2차 호출: 도구 결과를 바탕으로 최종 답변 생성 (임시 디버깅: gpt-3.5-turbo로 변경)
             final_res = await client.chat.completions.create(
-                model="ft:gpt-3.5-turbo-0125:personal::D0ovVHZb",
+                model="gpt-3.5-turbo",
                 messages=messages,
                 temperature=0.0,
             )
