@@ -1,10 +1,10 @@
 import sys
 import os
 
-# [Render 배포용] SQLite 버전 패치
+# SQLite 버전 패치 (Render 배포 호환성)
 try:
-    __import__('pysqlite3')
-    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+    import pysqlite3
+    sys.modules['sqlite3'] = pysqlite3
 except ImportError:
     pass
 
