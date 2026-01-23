@@ -446,7 +446,7 @@ async def get_astronomy_data(target_date: str):
     timeout_s = float(os.environ.get("ARA_ASTRONOMY_TIMEOUT_SECONDS", "2.0"))
 
     try:
-        async with httpx.AsyncClient(headers=HEADERS) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, headers=HEADERS) as client:
             res = await client.get(
                 url,
                 params={"serviceKey": DATA_GO_KR_SERVICE_KEY, "locdate": digits, "location": "부산"},
@@ -655,7 +655,7 @@ async def _http_get_json(
 
     try:
         if client is None:
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as _client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers=HEADERS) as _client:
                 res = await _client.get(url, params=params, timeout=timeout)
         else:
             res = await client.get(url, params=params, timeout=timeout)
@@ -712,7 +712,7 @@ async def get_kmou_weather(lang: str = "ko"):
         }
 
         try:
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers=HEADERS) as client:
                 res = await client.get(url, params=params, timeout=10.0)
                 data = res.json()
 
@@ -883,7 +883,7 @@ async def get_weather_info(lang: str = "ko") -> str:
                     "appid": owm_key,
                     "units": "metric",
                 }
-                async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers=HEADERS) as client:
                     res = await client.get(url, params=params, timeout=5.0)
                 res.raise_for_status()
                 data = res.json() or {}
@@ -1035,7 +1035,7 @@ async def get_bus_arrival(bus_number: str = None, direction: str = None, lang: s
     last_status_code: Optional[int] = None
     for arsno in ars_candidates:
         try:
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers=HEADERS) as client:
                 res = await client.get(
                     busan_bims_url,
                     params={"serviceKey": DATA_GO_KR_SERVICE_KEY, "arsno": arsno, "numOfRows": "50", "pageNo": "1"},
@@ -1344,7 +1344,7 @@ async def _get_bus_190_location_api_payload() -> Any:
         extra_headers["Authorization"] = _BUS_190_LOCATION_AUTH
 
     try:
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers={**HEADERS, **extra_headers}) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers={**HEADERS, **extra_headers}) as client:
             res = await client.get(_BUS_190_LOCATION_URL, params=params, timeout=_BUS_190_LOCATION_TIMEOUT_SECONDS)
         res.raise_for_status()
         # JSON 우선
@@ -1552,7 +1552,7 @@ async def get_bus_190_tracker_busbusinfo(line_id: str = "5200190000", kmou_stop_
         return None
 
     async def _call_xml(url: str, params: Dict[str, Any]) -> str:
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=HEADERS) as client:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers=HEADERS) as client:
             res = await client.get(url, params=params, timeout=timeout_s)
         res.raise_for_status()
         return res.text or ""
@@ -1805,7 +1805,7 @@ async def search_restaurants(query: str, limit: int = 5):
             # 영도구 전체를 커버하도록 반경 확대(중심: KMOU)
             radius_m = int(os.environ.get("ARA_KAKAO_YEONGDO_RADIUS_M", "20000"))
             radius_m = max(1000, min(radius_m, 20000))
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers={"Authorization": f"KakaoAK {kakao_key}"}) as client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers={"Authorization": f"KakaoAK {kakao_key}"}) as client:
                 # 필터링으로 0건이 될 수 있어 size는 여유 있게 요청
                 res = await client.get(
                     url,
@@ -1936,7 +1936,7 @@ async def get_random_yeongdo_restaurant(limit_pool: int = 15) -> str:
         try:
             url = "https://dapi.kakao.com/v2/local/search/keyword.json"
             headers = {"Authorization": f"KakaoAK {kakao_key}"}
-            async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers) as client:
+            async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers=headers) as client:
                 res = await client.get(
                     url,
                     params={
@@ -2365,8 +2365,8 @@ async def get_youth_jobs(keyword: Optional[str] = None, category_code: Optional[
             "Accept": "application/xml,text/xml,*/*"
         }
 
-        async with httpx.AsyncClient(verify=HTTPX_VERIFY, headers=headers, timeout=timeout_seconds) as client:
-            response = await client.get(api_url, params=params)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=10.0, verify=HTTPX_VERIFY, headers=headers) as client:
+            response = await client.get(api_url, params=params, timeout=timeout_seconds)
             
             # Step 1: Print HTTP Status Code
             status_code = response.status_code
