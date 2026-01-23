@@ -291,23 +291,10 @@ async def ask_ara(
         if len(examples_lines) > 1:
             examples_block = "\n" + "\n".join(examples_lines) + "\n"
 
-    norm = _norm_utterance(user_input)
-    if norm in {_norm_utterance("학식"), _norm_utterance("오늘 학식"), _norm_utterance("오늘의 식단")}:
-        response_text = "학식은 한국해양대학교 공식 페이지에서 확인하실 수 있습니다.\nhttps://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"
-        response_text = _sanitize_response_text_with_context(response_text, user_input)
-        save_conversation_pair(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            user_query=user_input,
-            ai_answer=response_text,
-            tools_used=[],
-            user_feedback=0,
-            is_gold_standard=False,
-        )
-        if return_meta:
-            return {"content": response_text, "conversation_id": conversation_id}
-        return response_text
+    # 학식 관련 질문은 RAG 엔진이 처리하도록 하드코딩 제거
+    # (RAG 엔진이 university_data/cafeteria_menu.txt를 읽어서 답변)
 
+    norm = _norm_utterance(user_input)
     quick_map = {
         _norm_utterance("지금 학교 날씨 어때?"): ("get_kmou_weather", {}),
         _norm_utterance("영도 착한가격 식당 추천해줘"): ("get_cheap_eats", {"food_type": ""}),

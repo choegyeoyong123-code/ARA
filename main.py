@@ -212,18 +212,17 @@ def _t(key: str) -> str:
     return ko.get(key, key)
 
 def _nav_quick_replies() -> list[dict]:
-    """Global Navigation - 8 buttons (English Mode removed)"""
-    base = [
-        {"label": "190번 출발 (구본관)", "action": "message", "messageText": "190 해양대구본관 출발"},
-        {"label": "학식", "action": "message", "messageText": "학식"},
-        {"label": "셔틀버스", "action": "message", "messageText": "셔틀 시간"},
-        {"label": "날씨", "action": "message", "messageText": "영도 날씨"},
-        {"label": "맛집 추천", "action": "message", "messageText": "맛집"},
-        {"label": "취업/정책", "action": "message", "messageText": "취업"},
-        {"label": "캠퍼스 연락처", "action": "message", "messageText": "캠퍼스 연락처"},
-        {"label": "학교 홈피", "action": "message", "messageText": "KMOU 홈페이지"},
+    """Global Navigation - 8 buttons"""
+    return [
+        {"label": "🚌 190번 출발 (구본관)", "action": "message", "messageText": "190 해양대구본관 출발"},
+        {"label": "🍱 오늘 학식 메뉴", "action": "message", "messageText": "오늘 학식 메뉴 알려줘"},
+        {"label": "🚐 셔틀버스 시간", "action": "message", "messageText": "셔틀 시간"},
+        {"label": "🌤 영도 날씨", "action": "message", "messageText": "영도 날씨"},
+        {"label": "📜 학사/장학 공지", "action": "message", "messageText": "최신 공지사항 알려줘"},
+        {"label": "💼 취업/정책", "action": "message", "messageText": "취업"},
+        {"label": "📞 캠퍼스 연락처", "action": "message", "messageText": "캠퍼스 연락처"},
+        {"label": "🏫 학교 홈피", "action": "message", "messageText": "KMOU 홈페이지"},
     ]
-    return base
 
 @app.on_event("startup")
 async def startup_diagnostics():
@@ -1046,6 +1045,11 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
             buttons=[{"action": "message", "label": "KMOU 홈페이지", "messageText": "KMOU 홈페이지"}],
         )
 
+    # 공지사항 버튼 클릭 시 RAG 검색이 우선 실행되도록 처리
+    if msg in {"공지사항", "공지", "학교 공지", "학사 공지", "최신 공지사항 알려줘", "장학 공지", "학사 공지사항"}:
+        # RAG 검색이 우선 실행되도록 ask_ara로 넘김 (None 반환)
+        return None
+
     # 버튼 중복/이전 컨텍스트 간섭 방지: 네비게이션 입력이면 pending을 선제 초기화
     if _is_nav_intent(msg):
         _pending_clear(user_id)
@@ -1100,16 +1104,8 @@ async def _handle_structured_kakao(user_msg: str, user_id: str | None):
                 buttons=[{"action": "message", "label": "다시 시도", "messageText": "맛집 제보하기"}],
             )
 
-    # Cafeteria menu: 크롤링 폐기 → KMOU Coop 사이트로 바로 연결
-    if ("학식" in msg) or ("식단" in msg) or ("cafeteria" in msg.lower()):
-        return _kakao_basic_card(
-            title="오늘의 학식",
-            description="한국해양대학교 소비자생활협동조합 사이트로 바로 연결합니다.",
-            buttons=[
-                {"action": "webLink", "label": "학식 보러가기", "webLinkUrl": "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189"},
-            ],
-            thumbnail_type="Cafeteria",
-        )
+    # 학식 관련 질문은 RAG 엔진이 처리하도록 하드코딩 제거
+    # (ask_ara의 RAG 엔진이 university_data/cafeteria_menu.txt를 읽어서 답변)
 
     # Weather
     if ("날씨" in msg) or ("weather" in msg.lower()):
