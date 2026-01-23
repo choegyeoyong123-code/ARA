@@ -11,6 +11,11 @@ except ImportError:
 from dotenv import load_dotenv
 load_dotenv()
 
+# API 키 검증
+if not os.getenv("OPENAI_API_KEY"):
+    print("❌ OPENAI_API_KEY가 설정되지 않았습니다.")
+    sys.exit(0)
+
 # 👇 이 아래부터 다른 import 작성
 
 # =========================
@@ -27,14 +32,24 @@ current_dir = Path(__file__).parent.absolute()
 data_dir = current_dir / "university_data"
 db_dir = current_dir / "university_db"
 
+# 폴더 안전장치: data_dir가 없으면 생성
+if not data_dir.exists():
+    data_dir.mkdir(parents=True, exist_ok=True)
+    print("⚠️ 데이터 폴더가 없어 생성했습니다.")
+
 print(f"🔍 데이터 읽는 중: {data_dir}")
 
-# 2. 데이터 로드
-loader = DirectoryLoader(str(data_dir), glob="**/*.txt", loader_cls=TextLoader, loader_kwargs={'encoding': 'utf-8'})
-documents = loader.load()
+# 2. 데이터 로드 (빈 데이터 처리)
+try:
+    loader = DirectoryLoader(str(data_dir), glob="**/*.txt", loader_cls=TextLoader, loader_kwargs={'encoding': 'utf-8'})
+    documents = loader.load()
+except Exception as e:
+    print(f"⚠️ 데이터 로드 중 오류 발생: {e}")
+    documents = []
 
 if not documents:
-    print("❌ 학습할 서류가 없습니다. university_data 폴더를 확인하세요.")
+    print("⚠️ 학습할 데이터가 없습니다. DB 생성을 건너뜁니다.")
+    sys.exit(0)
 else:
     # 3. 텍스트 분할 (청킹)
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=80)
