@@ -36,13 +36,14 @@ def collect_university_info(target_url, filename):
         print(f"  ❌ 수집 실패 ({filename}): {e}")
 
 # --- KMOU 게시판 목록 ---
+# --- 수집할 게시판 목록에 '식단 정보' 추가 ---
 urls_to_crawl = {
     "notice_general": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2032&bbsId=10373",
     "academic_guide": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2033&bbsId=11786",
     "scholarship_guide": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=5691&bbsId=10004365",
-    "events_seminar": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2034&bbsId=10375"
+    "events_seminar": "https://www.kmou.ac.kr/kmou/na/ntt/selectNttList.do?mi=2034&bbsId=10375",
+    "cafeteria_menu": "https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189" # 추가된 식단 URL
 }
-
 for name, url in urls_to_crawl.items():
     collect_university_info(url, name)
 
