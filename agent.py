@@ -4,6 +4,8 @@ import asyncio
 import re
 import uuid
 import inspect
+import time
+import hashlib
 from typing import Any, Optional, Dict
 from openai import AsyncOpenAI
 from tools import (
@@ -26,6 +28,42 @@ from rag import get_university_context
 
 _OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 client = AsyncOpenAI(api_key=_OPENAI_API_KEY) if _OPENAI_API_KEY else None
+
+# =========================
+# Response Cache (TTL: 3600 seconds)
+# =========================
+RESPONSE_CACHE: Dict[str, Dict[str, Any]] = {}
+_CACHE_TTL = 3600  # 1 hour
+_CACHEABLE_QUERIES = ["개강날짜", "시험기간", "셔틀시간", "학사일정", "개강", "중간고사", "기말고사", "방학"]
+
+def _get_cache_key(user_input: str, user_id: Optional[str] = None) -> str:
+    """Generate cache key from user input and user_id"""
+    key_str = f"{user_input}|{user_id or ''}"
+    return hashlib.md5(key_str.encode("utf-8")).hexdigest()
+
+def _is_cacheable_query(user_input: str) -> bool:
+    """Check if query is cacheable (fixed data like schedule)"""
+    user_lower = user_input.lower()
+    return any(keyword in user_lower for keyword in _CACHEABLE_QUERIES)
+
+def _get_cached_response(cache_key: str) -> Optional[str]:
+    """Get cached response if valid"""
+    if cache_key not in RESPONSE_CACHE:
+        return None
+    
+    cached = RESPONSE_CACHE[cache_key]
+    if time.time() - cached["timestamp"] > _CACHE_TTL:
+        del RESPONSE_CACHE[cache_key]
+        return None
+    
+    return cached["response"]
+
+def _set_cached_response(cache_key: str, response: str) -> None:
+    """Store response in cache"""
+    RESPONSE_CACHE[cache_key] = {
+        "response": response,
+        "timestamp": time.time()
+    }
 
 TOOL_MAP = {
     "get_bus_arrival": get_bus_arrival,
@@ -222,6 +260,7 @@ async def ask_ara(
     return_meta: bool = False,
     session_lang: str = "ko",
     current_context: Optional[Dict[str, Any]] = None,
+    callback_url: Optional[str] = None,
 ):
     if history is None:
         if user_id:
@@ -425,9 +464,29 @@ async def ask_ara(
         "3. 실시간 정보(버스, 날씨, 맛집)는 반드시 제공된 도구를 호출하여 정확한 데이터를 기반으로 답변하십시오.\n\n"
     )
 
+    # 캐시 확인 (고정 데이터 쿼리)
+    cache_key = _get_cache_key(user_input, user_id)
+    if _is_cacheable_query(user_input):
+        cached = _get_cached_response(cache_key)
+        if cached is not None:
+            print(f"[Cache Hit] {user_input[:50]}...")
+            save_conversation_pair(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                user_query=user_input,
+                ai_answer=cached,
+                tools_used=[],
+                user_feedback=0,
+                is_gold_standard=False,
+            )
+            if return_meta:
+                return {"content": cached, "conversation_id": conversation_id}
+            return cached
+
     university_context = None
     try:
-        university_context = await get_university_context(user_input, top_k=3)
+        # RAG 검색 개선: top_k 증가 (3 -> 5) 및 검색 알고리즘 개선
+        university_context = await get_university_context(user_input, top_k=5)
     except Exception as e:
         print(f"[RAG Warning] 학칙 검색 실패: {e}")
     
@@ -598,6 +657,11 @@ async def ask_ara(
 
     # --- 후처리 및 저장 ---
     response_text = _sanitize_response_text_with_context(response_text, user_input)
+    
+    # 캐시 저장 (고정 데이터 쿼리)
+    if _is_cacheable_query(user_input):
+        _set_cached_response(cache_key, response_text)
+    
     save_conversation_pair(
         conversation_id=conversation_id,
         user_id=user_id,
@@ -607,6 +671,34 @@ async def ask_ara(
         user_feedback=0,
         is_gold_standard=False,
     )
+    
+    # 콜백 URL이 있으면 Kakao SkillResponse 형식으로 전송
+    if callback_url:
+        try:
+            import httpx
+            # Kakao SkillResponse v2.0 형식 준수
+            callback_payload = {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": response_text
+                            }
+                        }
+                    ]
+                }
+            }
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                await client.post(
+                    callback_url,
+                    json=callback_payload,
+                    headers={"Content-Type": "application/json"}
+                )
+                print(f"[Callback] 응답 전송 완료: {callback_url}")
+        except Exception as e:
+            print(f"[Callback Error] 콜백 전송 실패: {e}")
+    
     if return_meta:
         return {"content": response_text, "conversation_id": conversation_id}
     return response_text

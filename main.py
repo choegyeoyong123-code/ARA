@@ -13,7 +13,7 @@ from collections import deque
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import xmltodict
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -1542,8 +1542,9 @@ async def feedback_endpoint(request: Request):
     
     return {"ok": True}
 
+
 @app.post("/query")
-async def kakao_endpoint(request: Request):
+async def kakao_endpoint(request: Request, background_tasks: BackgroundTasks):
     try:
         try:
             data = await request.json()
@@ -1553,6 +1554,7 @@ async def kakao_endpoint(request: Request):
         user_request = data.get("userRequest", {}) or {}
         user_msg = user_request.get("utterance") or ""
         kakao_user_id = ((user_request.get("user") or {}) or {}).get("id")
+        callback_url = data.get("callbackUrl")  # Kakao 콜백 URL (선택적)
 
         # 요청 시각 컨텍스트(KST) — LLM에 주입
         now_kst = datetime.now(_KST)
@@ -1647,6 +1649,87 @@ async def kakao_endpoint(request: Request):
         if structured is not None:
             return structured
 
+        # 콜백 URL이 있으면 비동기 처리 (5초 타임아웃 우회)
+        if callback_url:
+            # 즉시 Kakao Callback 형식으로 응답 반환
+            thinking_response = {
+                "version": "2.0",
+                "useCallback": True,
+                "data": {
+                    "text": "ARA가 학칙을 꼼꼼히 읽어보는 중입니다. 잠시만 기다려주세요! ⚓"
+                }
+            }
+            
+            # 백그라운드에서 LLM 처리 및 콜백 전송
+            async def process_and_callback():
+                try:
+                    # 15초 내부 타임아웃 설정 (Kakao Callback 최대 대기 시간)
+                    res = await asyncio.wait_for(
+                        ask_ara(
+                            user_msg, 
+                            user_id=kakao_user_id, 
+                            return_meta=True, 
+                            session_lang=session_lang, 
+                            current_context=current_context,
+                            callback_url=callback_url  # agent.py에서 콜백 전송
+                        ),
+                        timeout=15.0
+                    )
+                    # agent.py에서 이미 콜백을 전송했으므로 여기서는 로깅만
+                    print(f"[Callback Processing] 완료: {user_msg[:50]}...")
+                except asyncio.TimeoutError:
+                    print(f"[Callback Processing] 타임아웃: {user_msg[:50]}...")
+                    # 타임아웃 시 에러 메시지 콜백 전송
+                    try:
+                        error_payload = {
+                            "version": "2.0",
+                            "template": {
+                                "outputs": [
+                                    {
+                                        "simpleText": {
+                                            "text": "죄송합니다. 처리 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요."
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            await client.post(
+                                callback_url,
+                                json=error_payload,
+                                headers={"Content-Type": "application/json"}
+                            )
+                    except Exception as e:
+                        print(f"[Callback Error] 타임아웃 에러 콜백 전송 실패: {e}")
+                except Exception as e:
+                    print(f"[Callback Processing Error] {e}")
+                    # 에러 발생 시 에러 메시지 콜백 전송
+                    try:
+                        error_payload = {
+                            "version": "2.0",
+                            "template": {
+                                "outputs": [
+                                    {
+                                        "simpleText": {
+                                            "text": "죄송합니다. 시스템 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            await client.post(
+                                callback_url,
+                                json=error_payload,
+                                headers={"Content-Type": "application/json"}
+                            )
+                    except Exception as e2:
+                        print(f"[Callback Error] 에러 콜백 전송 실패: {e2}")
+            
+            background_tasks.add_task(process_and_callback)
+            return thinking_response
+        
+        # 콜백 URL이 없으면 기존 동기 처리
         st2, res = await _run_with_timeout(
             ask_ara(user_msg, user_id=kakao_user_id, return_meta=True, session_lang=session_lang, current_context=current_context),
             timeout=kakao_timeout,
@@ -1660,14 +1743,14 @@ async def kakao_endpoint(request: Request):
             except Exception:
                 pass
             return _kakao_basic_card(
-                title=_t("bridge_title"),
-                description=f"실시간 데이터를 가져오는 중입니다. 잠시 후 다시 시도해주세요.\n{_t('bridge_desc')}",
+                title="ARA가 생각 중입니다 ⚓",
+                description="ARA가 학칙을 꼼꼼히 읽어보는 중입니다. 3초만 기다려주세요! ⚓",
                 buttons=[{"action": "message", "label": _t("retry"), "messageText": user_msg}],
             )
         if st2 == "error":
             return _kakao_basic_card(
                 title="처리 오류",
-                description="요청을 처리하는 중 오류가 발생했습니다.",
+                description="죄송합니다. 시스템 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
                 buttons=[{"action": "message", "label": _t("retry"), "messageText": user_msg}],
             )
 

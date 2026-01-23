@@ -123,7 +123,7 @@ def initialize_vector_db(regulations: List[dict]) -> bool:
         return False
 
 
-async def get_university_context(query: str, top_k: int = 3) -> Optional[str]:
+async def get_university_context(query: str, top_k: int = 5) -> Optional[str]:
     """
     사용자 질문과 유사한 한국해양대학교 학칙 및 규정 텍스트를 검색
     
@@ -148,15 +148,22 @@ async def get_university_context(query: str, top_k: int = 3) -> Optional[str]:
         query_embedding = await _get_embedding(query)
         query_vector = np.array([query_embedding], dtype=np.float32)
         
-        # FAISS 검색
-        k = min(top_k, _index.ntotal)
-        if k == 0:
+        # FAISS 검색 (검색 범위 확대: top_k * 2로 검색 후 필터링)
+        search_k = min(top_k * 2, _index.ntotal)
+        if search_k == 0:
             return None
         
-        distances, indices = _index.search(query_vector, k)
+        distances, indices = _index.search(query_vector, search_k)
         
-        # 검색 결과 포맷팅
+        # 검색 결과 포맷팅 및 필터링
         results = []
+        seen_titles = set()  # 중복 제거
+        
+        # 키워드 기반 가중치 적용 (휴학, 학사 등 중요 키워드)
+        important_keywords = ["휴학", "학사", "장학금", "졸업", "수강신청", "복학", "등록금"]
+        query_lower = query.lower()
+        has_important_keyword = any(kw in query_lower for kw in important_keywords)
+        
         for i, idx in enumerate(indices[0]):
             if idx < len(_metadata):
                 doc = _metadata[idx]
@@ -165,13 +172,23 @@ async def get_university_context(query: str, top_k: int = 3) -> Optional[str]:
                 source = doc.get("source", "")
                 distance = float(distances[0][i])
                 
-                # 유사도가 너무 낮으면 제외 (임계값: 1.0)
-                if distance > 1.0:
+                # 중요 키워드가 있으면 임계값 완화 (1.0 -> 1.5)
+                threshold = 1.5 if has_important_keyword else 1.0
+                if distance > threshold:
                     continue
+                
+                # 중복 제거
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
                 
                 results.append(f"[{title}]\n{text}")
                 if source:
                     results[-1] += f"\n(출처: {source})"
+                
+                # top_k만큼만 반환
+                if len(results) >= top_k:
+                    break
         
         if not results:
             return None
