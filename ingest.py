@@ -1,21 +1,17 @@
 import sys
 import os
 
-# ==========================================
-# [Render 배포용] SQLite 패치 (ChromaDB 호환)
-# ==========================================
+# [Render 배포용] SQLite 버전 패치
 try:
     __import__('pysqlite3')
     sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-    print("✅ [System] pysqlite3 injected successfully.")
 except ImportError:
-    print("⚠️ [System] pysqlite3-binary not found. Using system sqlite3.")
     pass
 
 from dotenv import load_dotenv
 load_dotenv()
 
-# 👇 이 아래부터 다른 import들이 이어져야 함
+# 👇 이 아래부터 다른 import 작성
 
 # =========================
 # 나머지 import
