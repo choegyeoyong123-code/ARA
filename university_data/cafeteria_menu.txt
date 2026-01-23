@@ -1,347 +1,303 @@
-Title: 국립한국해양대학교 소비자생활협동조합
-
-URL Source: https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189
-
-Markdown Content:
 소비자생활협동조합
-===============
-
-[메인메뉴 바로가기](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189#gnb)[본문으로 바로가기](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189#container)
-
-[국립한국해양대학교](https://www.kmou.ac.kr/kmou/main.do "한국해양대학교(새창)")
-[![Image 5: 한국해양대학교](https://www.kmou.ac.kr/images/web/coop/common/logo3.png)](https://www.kmou.ac.kr/kmou/main.do "한국해양대학교(새창)")[소비자생활협동조합](https://www.kmou.ac.kr/coop/main.do "소비자생활협동조합")
-=============================================================================================================================================================================================
-
-검색 검색
-
-*   [홈](https://www.kmou.ac.kr/coop/main.do "홈")
-*   [로그인](https://www.kmou.ac.kr/kmou/lo/login/loginPage.do?mi=3510 "로그인")
-*   [사이트맵](https://www.kmou.ac.kr/coop/sitemap.do "사이트맵")
-
-*   [생협소개](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1162&cntntsId=1088)
-    *   [생협이란](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1162&cntntsId=1088)
-    *   [인사말](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1164&cntntsId=1089)
-    *   [연혁](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1165&cntntsId=1091)
-    *   [정관](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1166&cntntsId=1092)
-    *   [조직도](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1167&cntntsId=1093)
-    *   [오시는길](https://www.kmou.ac.kr/coop/lm/location/view.do?mi=1168)
-
-*   [매장안내](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1178&cntntsId=1095)
-    *   [식당](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1178&cntntsId=1095)
-    *   [편의점](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1179&cntntsId=1096)
-    *   [카페](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1180&cntntsId=1099)
-    *   [멀티숍](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1181&cntntsId=1102)
-    *   [자판기](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1182&cntntsId=1103)
-    *   [위탁운영시설](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=5258&cntntsId=6020)
-
-*   [메뉴안내](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189)
-    *   [오늘의 식단](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189)
-    *   [주간식단](https://www.kmou.ac.kr/coop/dv/dietView/selectDietCalendarView.do?mi=1190)
-
-*   [조합원 광장](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1192&cntntsId=1108)
-    *   [조합원 가입안내](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1192&cntntsId=1108)
-    *   [조합원 혜택](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1193&cntntsId=1109)
-    *   [조합원 탈퇴](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1194&cntntsId=1110)
-
-*   [매장 자료실](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1196&bbsId=11433)
-    *   [서점 신규도서](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1196&bbsId=11433)
-    *   [KMOU COOP 인스타그램](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1197&bbsId=11434)
-
-*   [커뮤니티](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1230&bbsId=11435)
-    *   [공지사항](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1230&bbsId=11435)
-    *   [제안건의](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1231&bbsId=11436)
-    *   [자유게시판](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1232&bbsId=11437)
-    *   [관련사이트](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1234&cntntsId=1111)
-
-[메뉴닫기](javascript:)
-
-*   [홈](https://www.kmou.ac.kr/coop/main.do "홈")
-*   [로그인](https://www.kmou.ac.kr/kmou/lo/login/loginPage.do?mi=3510 "로그인")
-*   [사이트맵](https://www.kmou.ac.kr/coop/sitemap.do "사이트맵")
-
-*   [생협소개](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1162&cntntsId=1088)
-    *   [생협이란](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1162&cntntsId=1088)
-    *   [인사말](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1164&cntntsId=1089)
-    *   [연혁](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1165&cntntsId=1091)
-    *   [정관](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1166&cntntsId=1092)
-    *   [조직도](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1167&cntntsId=1093)
-    *   [오시는길](https://www.kmou.ac.kr/coop/lm/location/view.do?mi=1168)
-
-*   [매장안내](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1178&cntntsId=1095)
-    *   [식당](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1178&cntntsId=1095)
-    *   [편의점](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1179&cntntsId=1096)
-    *   [카페](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1180&cntntsId=1099)
-    *   [멀티숍](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1181&cntntsId=1102)
-    *   [자판기](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1182&cntntsId=1103)
-    *   [위탁운영시설](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=5258&cntntsId=6020)
-
-*   [메뉴안내](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189)
-    *   [오늘의 식단](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189)
-    *   [주간식단](https://www.kmou.ac.kr/coop/dv/dietView/selectDietCalendarView.do?mi=1190)
-
-*   [조합원 광장](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1192&cntntsId=1108)
-    *   [조합원 가입안내](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1192&cntntsId=1108)
-    *   [조합원 혜택](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1193&cntntsId=1109)
-    *   [조합원 탈퇴](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1194&cntntsId=1110)
-
-*   [매장 자료실](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1196&bbsId=11433)
-    *   [서점 신규도서](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1196&bbsId=11433)
-    *   [KMOU COOP 인스타그램](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1197&bbsId=11434)
-
-*   [커뮤니티](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1230&bbsId=11435)
-    *   [공지사항](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1230&bbsId=11435)
-    *   [제안건의](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1231&bbsId=11436)
-    *   [자유게시판](https://www.kmou.ac.kr/coop/na/ntt/selectNttList.do?mi=1232&bbsId=11437)
-    *   [관련사이트](https://www.kmou.ac.kr/coop/cm/cntnts/cntntsView.do?mi=1234&cntntsId=1111)
-
-[![Image 6: 한국해양대학교](https://www.kmou.ac.kr/images/web/coop/common/logo4.png)](https://www.kmou.ac.kr/kmou/main.do "한국해양대학교(새창)")[소비자생활협동조합](https://www.kmou.ac.kr/coop/main.do "소비자생활협동조합")
-
-[![Image 7: 메뉴열기](https://www.kmou.ac.kr/images/web/coop/common/btn_menu_t.gif)](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189#menuOpen "메뉴열기")
-
-[![Image 8: 검색열기](https://www.kmou.ac.kr/images/web/coop/common/btn_search_t.gif)](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189#searchOpen "검색열기")
-
+메인메뉴 바로가기
+본문으로 바로가기
+국립한국해양대학교
+소비자생활협동조합
 검색
-
-통합검색 닫기
-
-소비자생활협동조합
----------
-
-좋은 품질의 제품을 저렴한 가격으로 제공하며
-
- 최고의 서비스를 제공하고자 최선을 다하는 소비자생활협동조합
-
+검색
+홈
+로그인
+사이트맵
+생협소개
+생협이란
+인사말
+연혁
+정관
+조직도
+오시는길
+매장안내
+식당
+편의점
+카페
+멀티숍
+자판기
+위탁운영시설
 메뉴안내
-====
-
-*   [오늘의 식단](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189 "오늘의 식단")
-*   [주간식단](https://www.kmou.ac.kr/coop/dv/dietView/selectDietCalendarView.do?mi=1190 "주간식단")
-
-[오늘의 식단](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189#)
-================================================================================
-
-[![Image 9: 메인페이지](https://www.kmou.ac.kr/images/template/00011/sub/icoHome.gif)](https://www.kmou.ac.kr/coop/main.do)메뉴안내**오늘의 식단**
-
-* * *
-
-인쇄 공유
-
-페이스북 트위터 카카오스토리 네이버밴드
-
 오늘의 식단
-------
-
-### [![Image 10: 이전 페이지](https://www.kmou.ac.kr/images/co/na/btn_page_l.gif)](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189#wrap) 2026년 01월 23일 금요일 [![Image 11: 다음 페이지](https://www.kmou.ac.kr/images/co/na/btn_page_r.gif)](https://www.kmou.ac.kr/coop/dv/dietView/selectDietDateView.do?mi=1189#wrap)
-
+주간식단
+조합원 광장
+조합원 가입안내
+조합원 혜택
+조합원 탈퇴
+매장 자료실
+서점 신규도서
+KMOU COOP 인스타그램
+커뮤니티
+공지사항
+제안건의
+자유게시판
+관련사이트
+메뉴닫기
+홈
+로그인
+사이트맵
+생협소개
+생협이란
+인사말
+연혁
+정관
+조직도
+오시는길
+매장안내
+식당
+편의점
+카페
+멀티숍
+자판기
+위탁운영시설
+메뉴안내
+오늘의 식단
+주간식단
+조합원 광장
+조합원 가입안내
+조합원 혜택
+조합원 탈퇴
+매장 자료실
+서점 신규도서
+KMOU COOP 인스타그램
+커뮤니티
+공지사항
+제안건의
+자유게시판
+관련사이트
+소비자생활협동조합
+검색
+통합검색 닫기
+소비자생활협동조합
+좋은 품질의 제품을 저렴한 가격으로 제공하며
+최고의 서비스를 제공하고자 최선을 다하는 소비자생활협동조합
+메뉴안내
+오늘의 식단
+주간식단
+오늘의 식단
+메뉴안내
+오늘의 식단
+인쇄
+공유
+페이스북
+트위터
+카카오스토리
+네이버밴드
+오늘의 식단
+2026년 01월 23일 금요일
 학생식당·스낵코너
----------
-
-| 양식코너 | 라면코너 | 분식코너 | 정식 |
-| --- | --- | --- | --- |
-| 돈까스 치킨치즈돈가스 파채돈가스 더블돈가스 치킨치즈더블돈가스 파채더블돈가스 빅고구마치즈돈가스 빅등심돈가스 | 계란라면 계란치즈라면 부대찌개라면+공깃밥 해장라면 | 얼큰샤브칼국수+밥반공기 | 치킨마요덮밥 우동장국 단무지 배추김치 |
-
+양식코너
+라면코너
+분식코너
+정식
+돈까스
+치킨치즈돈가스
+파채돈가스
+더블돈가스
+치킨치즈더블돈가스
+파채더블돈가스
+빅고구마치즈돈가스
+빅등심돈가스
+계란라면
+계란치즈라면
+부대찌개라면+공깃밥
+해장라면
+얼큰샤브칼국수 + 밥반공기
+치킨마요덮밥
+우동장국
+단무지
+배추김치
 교직원 식당
-------
-
-| 조식 | 중식 | 석식 |
-| --- | --- | --- |
-| 바지락미역국 | 백미밥 두부미소국 카레라이스 칼집소세지구이 타코야끼*데리마요 배추김치 치커리겉절이 | 백미밥 맑은콩나물국 생선까스*타르타르 부들어묵볶음 양념깻잎지 깍두기 그린샐러드*망고D |
-
-**담당자** : 이하연 **전화** : 051-410-4026[소비자생활협동조합] **업데이트** : 2025-04-22
-
+조식
+중식
+석식
+바지락미역국
+백미밥
+두부미소국
+카레라이스
+칼집소세지구이
+타코야끼*데리마요
+배추김치
+치커리겉절이
+백미밥
+맑은콩나물국
+생선까스*타르타르
+부들어묵볶음
+양념깻잎지
+깍두기
+그린샐러드*망고D
+담당자
+: 이하연
+전화
+: 051-410-4026[소비자생활협동조합]
+업데이트
+: 2025-04-22
 게재된 내용 및 운영에 대한 개선사항이 있으면 자료관리 담당자에게 연락하시기 바랍니다.
-
-### 콘텐츠 만족도 조사
-
+콘텐츠 만족도 조사
 페이지에서 제공하는 정보에 대하여 어느 정도 만족하셨습니까?
-
 만족도 조사
-
-매우만족 만족 보통 불만족 매우불만족 
-
-기타의견 :  
-
+매우만족
+만족
+보통
+불만족
+매우불만족
+기타의견 :
 Footer Link
-*   [개인정보처리방침](https://www.kmou.ac.kr/kmou/cm/cntnts/cntntsView.do?mi=3613&cntntsId=8843 "개인정보처리방침(새창)")
-*   [이메일주소무단수집거부](https://www.kmou.ac.kr/kmou/cm/cntnts/cntntsView.do?mi=3512&cntntsId=989 "이메일주소무단수집거부(새창)")
-
+개인정보처리방침
+이메일주소무단수집거부
 교내주요홈페이지
-
-### 포털사이트
-
-*   [대표홈페이지](https://www.kmou.ac.kr/kmou/main.do "대표홈페이지(새창)")
-*   [종합정보시스템](http://tis.kmou.ac.kr/ "종합정보시스템(새창)")
-*   [KORUS](http://kmou.korus.ac.kr/ "KORUS(새창)")
-*   [LMS](https://lms.kmou.ac.kr/ "LMS(새창)")
-*   [웹메일](https://wmail.kmou.ac.kr/ "웹메일(새창)")
-*   [학생 웹메일](https://www.kmou.ac.kr/gsuite/ "학생 웹메일(새창)")
-*   [Ocean-CTS](https://cts.kmou.ac.kr/ "Ocean-CTS(새창)")
-*   [도서관](https://library.kmou.ac.kr/ "도서관(새창)")
-*   [연구비 통합 관리시스템(ERP)](https://sanhak-erp.kmou.ac.kr/main_0001_01.act "연구비 통합 관리시스템(ERP)(새창)")
-*   [온라인설문조사](http://irsurvey.kmou.ac.kr/ "온라인설문조사(새창)")
-*   [통합성과관리시스템](http://ir.kmou.ac.kr/ "통합성과관리시스템(새창)")
-*   [전자출결시스템](https://attend.kmou.ac.kr/kmou/student/ "전자출결시스템(새창)")
-
-### 해사대학
-
-*   [항해융합학부](https://www.kmou.ac.kr/navigation/main.do "항해융합학부(새창)")
-*   [기관시스템공학부(2021)](https://www.kmou.ac.kr/egsys/main.do "기관시스템공학부(2021)(새창)")
-*   [해양경찰학부](http://www.kmou.ac.kr/mp/main.do "해양경찰학부(새창)")
-*   [해사수송과학부](http://www.kmou.ac.kr/mts/main.do "해사수송과학부(새창)")
-*   [기관시스템공학부](http://www.kmou.ac.kr/eg/main.do "기관시스템공학부(새창)")
-*   [항해학부](http://www.kmou.ac.kr/nav/main.do "항해학부(새창)")
-*   [기관공학부](http://www.kmou.ac.kr/e/main.do "기관공학부(새창)")
-*   [해양플랜트운영학과](http://www.kmou.ac.kr/opma/main.do "해양플랜트운영학과(새창)")
-*   [해사IT공학부](http://www.kmou.ac.kr/mit/main.do "해사IT공학부(새창)")
-*   [해사글로벌학부](http://www.kmou.ac.kr/mglobal/main.do "해사글로벌학부(새창)")
-*   [선박운항과](http://www.kmou.ac.kr/shipoperation/main.do "선박운항과(새창)")
-*   [해사인공지능·보안학부](https://www.kmou.ac.kr/aisec/main.do "해사인공지능·보안학부(새창)")
-
-### 해양과학기술융합대학
-
-*   [조선해양시스템공학부](http://www.kmou.ac.kr/naoe/main.do "조선해양시스템공학부(새창)")
-*   [해양공학과](http://www.kmou.ac.kr/oe/main.do "해양공학과(새창)")
-*   [에너지자원공학과](http://www.kmou.ac.kr/energy/main.do "에너지자원공학과(새창)")
-*   [해양공간건축학부](http://www.kmou.ac.kr/ocean-aos/main.do "해양공간건축학부(새창)")
-*   [해양환경학전공](http://www.kmou.ac.kr/dos/main.do "해양환경학전공(새창)")
-*   [해양생물공학전공·수산바이오공학전공](http://www.kmou.ac.kr/dmb/main.do "해양생물공학전공·수산바이오공학전공(새창)")
-*   [해양스포츠과학과](http://www.kmou.ac.kr/ocean-ope/main.do "해양스포츠과학과(새창)")
-*   [기계공학부](http://www.kmou.ac.kr/me/main.do "기계공학부(새창)")
-*   [전기전자공학전공](https://www.kmou.ac.kr/eee/main.do "전기전자공학전공(새창)")
-*   [전자정보통신공학전공](https://www.kmou.ac.kr/elecom/main.do "전자정보통신공학전공(새창)")
-*   [전자소재공학전공](https://www.kmou.ac.kr/semi/main.do "전자소재공학전공(새창)")
-*   [전파융합공학전공](https://www.kmou.ac.kr/jeonpa/main.do "전파융합공학전공(새창)")
-*   [데이터사이언스전공](https://www.kmou.ac.kr/di/main.do "데이터사이언스전공(새창)")
-*   [인공지능공학부](https://www.kmou.ac.kr/ca/main.do "인공지능공학부(새창)")
-*   [물류시스템공학과](https://www.kmou.ac.kr/cls/main.do "물류시스템공학과(새창)")
-*   [환경공학과](https://www.kmou.ac.kr/ene/main.do "환경공학과(새창)")
-*   [토목공학과](https://www.kmou.ac.kr/civil/main.do "토목공학과(새창)")
-*   [해양신소재융합공학과](https://www.kmou.ac.kr/mmt/main.do "해양신소재융합공학과(새창)")
-
-### 해양인문사회과학대학
-
-*   [해운경영학부](http://www.kmou.ac.kr/shipping/main.do "해운경영학부(새창)")
-*   [해사법학부](http://www.kmou.ac.kr/law/main.do "해사법학부(새창)")
-*   [국제무역경제학부](http://www.kmou.ac.kr/ite/main.do "국제무역경제학부(새창)")
-*   [국제관계학과](http://www.kmou.ac.kr/ic/main.do "국제관계학과(새창)")
-*   [해양행정학과](http://www.kmou.ac.kr/dicma/main.do "해양행정학과(새창)")
-*   [해양영어영문학과](http://www.kmou.ac.kr/hhuenglish/main.do "해양영어영문학과(새창)")
-*   [동아시아학과](http://www.kmou.ac.kr/eastasia/main.do "동아시아학과(새창)")
-*   [교직과](http://www.kmou.ac.kr/teachereducation/main.do "교직과(새창)")
-*   [경제산업학부](http://www.kmou.ac.kr/eco/main.do "경제산업학부(새창)")
-*   [법무비즈니스학부](http://www.kmou.ac.kr/bizlaw/main.do "법무비즈니스학부(새창)")
-
-### 해양군사대학
-
-*   [해양군사학부](http://www.kmou.ac.kr/navy/cm/cntnts/cntntsView.do?mi=1060&cntntsId=1060 "해양군사학부(새창)")
-*   [해양군사학과(대학원)](http://www.kmou.ac.kr/navy/cm/cntnts/cntntsView.do?mi=1060&cntntsId=1060 "해양군사학과(대학원)(새창)")
-
-### 대학원
-
-*   [일반대학원](http://www.kmou.ac.kr/graduate/main.do "일반대학원(새창)")
-*   [해사산업대학원](http://www.kmou.ac.kr/mis-graduate/main.do "해사산업대학원(새창)")
-*   [해양과학기술전문대학원](https://www.kmou.ac.kr/kmou/cm/cntnts/cntntsView.do?mi=3666&cntntsId=2300#sideContent "해양과학기술전문대학원(새창)")
-*   [해양금융대학원](https://www.kmou.ac.kr/finance/main.do "해양금융대학원(새창)")
-*   [글로벌물류대학원](https://www.kmou.ac.kr/spl/main.do "글로벌물류대학원(새창)")
-
-### 기본시설
-
-*   [도서관](https://library.kmou.ac.kr/ "도서관(새창)")
-*   [정보전산원](https://www.kmou.ac.kr/cisc/main.do "정보전산원(새창)")
-
-### 부속시설
-
-*   [박물관](http://www.kmou.ac.kr/museum/main.do "박물관(새창)")
-*   [인권센터](https://www.kmou.ac.kr/shp/main.do "인권센터(새창)")
-*   [평생교육원](http://www.kmou.ac.kr/edu/main.do "평생교육원(새창)")
-*   [기록관](http://www.kmou.ac.kr/archives/main.do "기록관(새창)")
-*   [마린시뮬레이션센터](http://www.kmou.ac.kr/edutech/main.do "마린시뮬레이션센터(새창)")
-*   [해양벤처진흥센터](https://www.kmou.ac.kr/kmubi/main.do "해양벤처진흥센터(새창)")
-*   [산학연ETRS센터](http://www.kmou.ac.kr/etrs/main.do "산학연ETRS센터(새창)")
-*   [해기교육품질보증센터](http://www.kmou.ac.kr/met/main.do "해기교육품질보증센터(새창)")
-*   [국제해사교육지원센터](http://www.kmou.ac.kr/glomet/main.do "국제해사교육지원센터(새창)")
-*   [학생상담센터](http://www.kmou.ac.kr/counsel/main.do "학생상담센터(새창)")
-*   [창업교육센터](https://lincplus.kmou.ac.kr/sub/sub0301.php "창업교육센터(새창)")
-*   [현장실습지원센터](https://lincplus.kmou.ac.kr/sub/sub0401.php "현장실습지원센터(새창)")
-*   [융복합공동장비센터](https://lincplus.kmou.ac.kr/sub/sub0701.php "융복합공동장비센터(새창)")
-*   [장애학생지원센터](http://www.kmou.ac.kr/sedu/main.do "장애학생지원센터(새창)")
-*   [사회봉사센터](http://www.kmou.ac.kr/svc/main.do "사회봉사센터(새창)")
-*   [기업협업센터(ICC)-산학협력종합서비스](http://allset.kmou.ac.kr/ "기업협업센터(ICC)-산학협력종합서비스(새창)")
-*   [지역협업센터(RCC)](https://lincplus.kmou.ac.kr/sub/sub0601.php "지역협업센터(RCC)(새창)")
-*   [교수학습개발원](http://www.kmou.ac.kr/kmouctl/main.do "교수학습개발원(새창)")
-*   [한국어교육원](https://www.kmou.ac.kr/global/main.do "한국어교육원(새창)")
-*   [KMOU국립대학육성사업](https://www.kmou.ac.kr/smartkmou/main.do "KMOU국립대학육성사업(새창)")
-*   [대학IR센터](https://www.kmou.ac.kr/ir/main.do "대학IR센터(새창)")
-*   [학생혁신센터](https://www.kmou.ac.kr/kmoucea/main.do "학생혁신센터(새창)")
-
-### 지원시설
-
-*   [해기교육원](http://www.kmou.ac.kr/stc/main.do "해기교육원(새창)")
-*   [학생생활관](http://www.kmou.ac.kr/dorm/main.do "학생생활관(새창)")
-*   [승선생활관](http://www.kmou.ac.kr/badaro/main.do "승선생활관(새창)")
-*   [공동실험실습관](https://www.kmoulab.kr/ "공동실험실습관(새창)")
-*   [교양교육원](http://www.kmou.ac.kr/cle/main.do "교양교육원(새창)")
-
-### 연구시설
-
-*   [해사산업연구소](http://www.kmou.ac.kr/miri/main.do "해사산업연구소(새창)")
-*   [산업기술연구소](https://www.kmou.ac.kr/riit/main.do "산업기술연구소(새창)")
-*   [해양과학기술연구소](http://www.kmou.ac.kr/riost/main.do "해양과학기술연구소(새창)")
-*   [세계해양발전연구소](http://www.kmou.ac.kr/wodsi/main.do "세계해양발전연구소(새창)")
-*   [국제해양문제연구소](http://ima.ac.kr/ "국제해양문제연구소(새창)")
-*   [원전기자재연구센터](http://www.kmou.ac.kr/nuperc/main.do "원전기자재연구센터(새창)")
-*   [해상교통안전진단연구센터](http://www.kmou.ac.kr/auditctr/main.do "해상교통안전진단연구센터(새창)")
-*   [수중운동체특화연구센터](http://www.kmou.ac.kr/uvrc/main.do "수중운동체특화연구센터(새창)")
-*   [중소기업산학협력센터](http://www.kmou.ac.kr/kmuc/main.do "중소기업산학협력센터(새창)")
-*   [용접·접합소부장지원센터 레이저응용기술지원센터](https://www.kmou.ac.kr/wjmcenter/main.do "용접·접합소부장지원센터 레이저응용기술지원센터(새창)")
-
-### 사업단
-
-*   [RISE 사업단](https://www.kmou-rise.kr/ "RISE 사업단(새창)")
-*   [해운항만물류미래창조인력양성사업단](http://portlogi.kmou.ac.kr/ "해운항만물류미래창조인력양성사업단(새창)")
-*   [4단계BK21사업](http://bk21fourkmou.org/ "4단계BK21사업(새창)")
-*   [RIS 스마트항만물류사업단](https://brip-spl.kr/ "RIS 스마트항만물류사업단(새창)")
-
-### 기타 홈페이지
-
-*   [입학정보](http://www.kmou.ac.kr/ipsi/main.do "입학정보(새창)")
-*   [학생서비스시스템](http://www.kmou.ac.kr/onestop/main.do "학생서비스시스템(새창)")
-*   [산학협력단](http://www.kmou.ac.kr/sanhak/main.do "산학협력단(새창)")
-*   [소비자생활협동조합](http://www.kmou.ac.kr/coop/main.do "소비자생활협동조합(새창)")
-*   [대학발전기금](http://www.kmou.ac.kr/gfund/main.do "대학발전기금(새창)")
-*   [박물관](http://www.kmou.ac.kr/museum/main.do "박물관(새창)")
-*   [언론사](http://www.kmoumedia.com/ "언론사(새창)")
-*   [총동창회](http://www.kmouaa.or.kr/ "총동창회(새창)")
-*   [교수회](http://www.kmou.ac.kr/facultya/main.do "교수회(새창)")
-*   [직장협의회](http://www.kmou.ac.kr/kgeu/main.do "직장협의회(새창)")
-*   [동아리](http://www.kmou.ac.kr/kms/main.do "동아리(새창)")
-*   [업무편람정보방](http://www.kmou.ac.kr/bus/main.do "업무편람정보방(새창)")
-*   [한국해양대학교 오션아카데미](http://www.ok21.org/ "한국해양대학교 오션아카데미(새창)")
-*   [창의ㆍ실용방](http://www.kmou.ac.kr/innovation/main.do "창의ㆍ실용방(새창)")
-*   [AMFUF](http://www.kmou.ac.kr/amfuf/main.do "AMFUF(새창)")
-*   [학생성장지원실](https://www.kmou.ac.kr/myhaemi/main.do "학생성장지원실(새창)")
-
-### 연구실 및 실험실
-
-*   [석유공학연구실](http://petro.kmou.ac.kr/ "석유공학연구실(새창)")
-*   [유동정보연구실](http://www.pivlab.net/ "유동정보연구실(새창)")
-*   [해양분자환경생리학 연구실](http://marinelab.kmou.ac.kr/ "해양분자환경생리학 연구실(새창)")
-*   [해양유체역학실험실](http://ofl.kmou.ac.kr/ "해양유체역학실험실(새창)")
-*   [전산고체역학실험실](http://home.kmou.ac.kr/~cjr "전산고체역학실험실(새창)")
-*   [친환경에너지소재실험실](https://sites.google.com/site/jihoyoonlab "친환경에너지소재실험실(새창)")
-*   [물에너지융합실험실](http://www.wenl.co.kr/ "물에너지융합실험실(새창)")
-*   [자원처리공학연구실](http://www.repro.kr/ "자원처리공학연구실(새창)")
-
-### 학생회 및 동아리
-
-*   [총동아리 연합회](https://band.us/band/69213281 "총동아리 연합회(새창)")
-*   [아치레오 동아리](http://cafe.naver.com/achileo.cafe "아치레오 동아리(새창)")
-*   [ZED 동아리](http://club.cyworld.com/hhuzed "ZED 동아리(새창)")
-*   [이코노미스트](http://cafe.daum.net/economist1 "이코노미스트(새창)")
-*   [파도소리](http://padosori.tistory.com/ "파도소리(새창)")
-*   [Skin-SCUBA Team (ORCA)](http://cafe.naver.com/orca4535 "Skin-SCUBA Team (ORCA)(새창)")
-*   [증권투자동아리 금융연구회](http://club.cyworld.com/kmu-fi "증권투자동아리 금융연구회(새창)")
-
-(49112) 부산광역시 영도구 태종로 727(동삼동) 국립한국해양대학교 051-410-4025~7 Fax.051-404-0104
-
+포털사이트
+대표홈페이지
+종합정보시스템
+KORUS
+LMS
+웹메일
+학생 웹메일
+Ocean-CTS
+도서관
+연구비 통합 관리시스템(ERP)
+온라인설문조사
+통합성과관리시스템
+전자출결시스템
+해사대학
+항해융합학부
+기관시스템공학부(2021)
+해양경찰학부
+해사수송과학부
+기관시스템공학부
+항해학부
+기관공학부
+해양플랜트운영학과
+해사IT공학부
+해사글로벌학부
+선박운항과
+해사인공지능·보안학부
+해양과학기술융합대학
+조선해양시스템공학부
+해양공학과
+에너지자원공학과
+해양공간건축학부
+해양환경학전공
+해양생물공학전공·수산바이오공학전공
+해양스포츠과학과
+기계공학부
+전기전자공학전공
+전자정보통신공학전공
+전자소재공학전공
+전파융합공학전공
+데이터사이언스전공
+인공지능공학부
+물류시스템공학과
+환경공학과
+토목공학과
+해양신소재융합공학과
+해양인문사회과학대학
+해운경영학부
+해사법학부
+국제무역경제학부
+국제관계학과
+해양행정학과
+해양영어영문학과
+동아시아학과
+교직과
+경제산업학부
+법무비즈니스학부
+해양군사대학
+해양군사학부
+해양군사학과(대학원)
+대학원
+일반대학원
+해사산업대학원
+해양과학기술전문대학원
+해양금융대학원
+글로벌물류대학원
+기본시설
+도서관
+정보전산원
+부속시설
+박물관
+인권센터
+평생교육원
+기록관
+마린시뮬레이션센터
+해양벤처진흥센터
+산학연ETRS센터
+해기교육품질보증센터
+국제해사교육지원센터
+학생상담센터
+창업교육센터
+현장실습지원센터
+융복합공동장비센터
+장애학생지원센터
+사회봉사센터
+기업협업센터(ICC)-산학협력종합서비스
+지역협업센터(RCC)
+교수학습개발원
+한국어교육원
+KMOU국립대학육성사업
+대학IR센터
+학생혁신센터
+지원시설
+해기교육원
+학생생활관
+승선생활관
+공동실험실습관
+교양교육원
+연구시설
+해사산업연구소
+산업기술연구소
+해양과학기술연구소
+세계해양발전연구소
+국제해양문제연구소
+원전기자재연구센터
+해상교통안전진단연구센터
+수중운동체특화연구센터
+중소기업산학협력센터
+용접·접합소부장지원센터 레이저응용기술지원센터
+사업단
+RISE 사업단
+해운항만물류미래창조인력양성사업단
+4단계BK21사업
+RIS 스마트항만물류사업단
+기타 홈페이지
+입학정보
+학생서비스시스템
+산학협력단
+소비자생활협동조합
+대학발전기금
+박물관
+언론사
+총동창회
+교수회
+직장협의회
+동아리
+업무편람정보방
+한국해양대학교 오션아카데미
+창의ㆍ실용방
+AMFUF
+학생성장지원실
+연구실 및 실험실
+석유공학연구실
+유동정보연구실
+해양분자환경생리학 연구실
+해양유체역학실험실
+전산고체역학실험실
+친환경에너지소재실험실
+물에너지융합실험실
+자원처리공학연구실
+학생회 및 동아리
+총동아리 연합회
+아치레오 동아리
+ZED 동아리
+이코노미스트
+파도소리
+Skin-SCUBA Team (ORCA)
+증권투자동아리 금융연구회
+(49112) 부산광역시 영도구 태종로 727(동삼동) 국립한국해양대학교
+051-410-4025~7 Fax.051-404-0104
 Copyright (c) NATIONAL Korea Maritime & Ocean University. All rights reserved.
