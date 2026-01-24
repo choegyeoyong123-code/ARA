@@ -12,6 +12,7 @@ import time
 import random
 import logging
 from pathlib import Path
+from datetime import datetime
 
 # =================================================================
 # [핵심] 라이브러리 로드 방어막 (Import Error로 인한 Crash 방지)
@@ -319,12 +320,64 @@ def main():
 
     print("✅ [Collector] 모든 작업 완료. 정상 종료합니다.")
 
-if __name__ == "__main__":
+# =================================================================
+# 스케줄러 설정 (새벽 4시에 한 번만 실행)
+# =================================================================
+def run_scheduled_collection():
+    """스케줄러에 의해 호출되는 함수"""
+    logger.info("⏰ [Scheduler] 새벽 4시 크롤링 작업 시작")
     try:
         main()
     except Exception as e:
-        # 어떤 치명적 오류가 나도 로그만 찍고 정상 종료(Exit 0)
-        print(f"⚠️ [Collector] 알 수 없는 오류 발생: {e}")
-        print("➡️ 시스템 안정성을 위해 정상 종료 처리합니다.")
-    finally:
-        sys.exit(0) # <--- [핵심] 무조건 성공한 척 종료
+        logger.error(f"❌ [Scheduler] 크롤링 오류: {e}")
+    logger.info("✅ [Scheduler] 크롤링 작업 완료")
+
+if __name__ == "__main__":
+    # 스케줄러 모드 확인 (환경 변수)
+    SCHEDULER_MODE = os.getenv("COLLECTOR_SCHEDULER_MODE", "false").lower() == "true"
+    
+    if SCHEDULER_MODE:
+        # 스케줄러 모드: 새벽 4시에 자동 실행
+        try:
+            from apscheduler.schedulers.blocking import BlockingScheduler
+            from apscheduler.triggers.cron import CronTrigger
+            
+            scheduler = BlockingScheduler(timezone="Asia/Seoul")
+            
+            # 매일 새벽 4시에 실행
+            scheduler.add_job(
+                run_scheduled_collection,
+                trigger=CronTrigger(hour=4, minute=0),
+                id="daily_collection",
+                name="새벽 4시 데이터 수집",
+                replace_existing=True
+            )
+            
+            logger.info("✅ [Scheduler] 스케줄러 시작됨 (매일 새벽 4시 실행)")
+            logger.info("⏰ [Scheduler] 다음 실행 시간: 매일 04:00 (KST)")
+            
+            # 스케줄러 실행 (무한 루프)
+            scheduler.start()
+            
+        except ImportError:
+            logger.warning("⚠️ [Scheduler] APScheduler가 설치되지 않았습니다. 일반 모드로 실행합니다.")
+            try:
+                main()
+            except Exception as e:
+                logger.error(f"❌ [Collector] 오류: {e}")
+            finally:
+                sys.exit(0)
+        except KeyboardInterrupt:
+            logger.info("⏹️ [Scheduler] 사용자에 의해 중단됨")
+            sys.exit(0)
+    else:
+        # 일반 모드: 즉시 실행 (수동 실행 또는 배포 시 초기 수집)
+        try:
+            logger.info("🚀 [Collector] 일반 모드 실행 (즉시 수집)")
+            main()
+        except Exception as e:
+            # 어떤 치명적 오류가 나도 로그만 찍고 정상 종료(Exit 0)
+            logger.error(f"⚠️ [Collector] 알 수 없는 오류 발생: {e}")
+            logger.info("➡️ 시스템 안정성을 위해 정상 종료 처리합니다.")
+        finally:
+            sys.exit(0) # <--- [핵심] 무조건 성공한 척 종료

@@ -84,6 +84,97 @@ TOOL_MAP = {
 }
 
 # ==========================================
+# [속도 최적화] 키워드 기반 직접 라우팅
+# LLM Function Calling을 우회하여 즉시 데이터 조회
+# ==========================================
+DIRECT_ROUTING = {
+    # 학식 관련
+    "학식": ("get_university_info", {"category": "cafeteria_menu"}),
+    "메뉴": ("get_university_info", {"category": "cafeteria_menu"}),
+    "밥": ("get_university_info", {"category": "cafeteria_menu"}),
+    "식단": ("get_university_info", {"category": "cafeteria_menu"}),
+    "오늘학식": ("get_university_info", {"category": "cafeteria_menu"}),
+    "오늘 학식": ("get_university_info", {"category": "cafeteria_menu"}),
+    "식당": ("get_university_info", {"category": "cafeteria_menu"}),
+    "오늘밥": ("get_university_info", {"category": "cafeteria_menu"}),
+    
+    # 공지사항
+    "공지": ("get_university_info", {"category": "notice_general"}),
+    "공지사항": ("get_university_info", {"category": "notice_general"}),
+    "최신공지": ("get_university_info", {"category": "notice_general"}),
+    "최신 공지": ("get_university_info", {"category": "notice_general"}),
+    "학사공지": ("get_university_info", {"category": "notice_general"}),
+    "장학공지": ("get_university_info", {"category": "notice_general"}),
+    
+    # 학사 안내
+    "학사": ("get_university_info", {"category": "academic_guide"}),
+    "학사일정": ("get_university_info", {"category": "academic_guide"}),
+    "학사 일정": ("get_university_info", {"category": "academic_guide"}),
+    "수강신청": ("get_university_info", {"category": "academic_guide"}),
+    "등록금": ("get_university_info", {"category": "academic_guide"}),
+    "수강": ("get_university_info", {"category": "academic_guide"}),
+    
+    # 장학금
+    "장학": ("get_university_info", {"category": "scholarship_guide"}),
+    "장학금": ("get_university_info", {"category": "scholarship_guide"}),
+    
+    # 행사/세미나
+    "행사": ("get_university_info", {"category": "events_seminar"}),
+    "세미나": ("get_university_info", {"category": "events_seminar"}),
+    
+    # 버스 관련 (실시간 API)
+    "190": ("get_bus_190_tracker_busbusinfo", {}),
+    "190번": ("get_bus_190_tracker_busbusinfo", {}),
+    "버스도착": ("get_bus_190_tracker_busbusinfo", {}),
+    "버스 도착": ("get_bus_190_tracker_busbusinfo", {}),
+    "해양대구본관": ("get_bus_190_tracker_busbusinfo", {}),
+    "구본관": ("get_bus_190_tracker_busbusinfo", {}),
+    
+    # 셔틀버스
+    "셔틀": ("get_shuttle_next_buses", {}),
+    "셔틀버스": ("get_shuttle_next_buses", {}),
+    "셔틀 시간": ("get_shuttle_next_buses", {}),
+    
+    # 날씨
+    "날씨": ("get_kmou_weather", {}),
+    "영도날씨": ("get_kmou_weather", {}),
+    "영도 날씨": ("get_kmou_weather", {}),
+    "기온": ("get_kmou_weather", {}),
+    "온도": ("get_kmou_weather", {}),
+    
+    # 캠퍼스 연락처
+    "연락처": ("get_campus_contacts", {}),
+    "전화번호": ("get_campus_contacts", {}),
+    "연락": ("get_campus_contacts", {}),
+    "캠퍼스": ("get_campus_contacts", {}),
+    
+    # 학사일정
+    "일정": ("get_academic_schedule", {}),
+    
+    # 청년 정책 (키워드 추출 필요)
+    "청년": ("get_youth_policy", {}),
+    "지원금": ("get_youth_policy", {}),
+    "청년정책": ("get_youth_policy", {}),
+    "취업": ("get_youth_policy", {}),
+}
+
+# ==========================================
+# 카드 이미지 URL 매핑 (퀵 플레이별)
+# 카카오톡 이미지 URL은 HTTPS로 시작하고, 최소 200x200px 권장
+# ==========================================
+CARD_IMAGES = {
+    "190": "https://t1.daumcdn.net/cfile/tistory/2513B3335658B7B32A",  # 버스 이미지 (플레이스홀더)
+    "학식": "https://t1.daumcdn.net/cfile/tistory/2513B3335658B7B32A",  # 식당 이미지 (플레이스홀더)
+    "셔틀": "https://t1.daumcdn.net/cfile/tistory/2513B3335658B7B32A",  # 셔틀버스 이미지 (플레이스홀더)
+    "날씨": "https://t1.daumcdn.net/cfile/tistory/2513B3335658B7B32A",  # 날씨 이미지 (플레이스홀더)
+    "공지": "https://t1.daumcdn.net/cfile/tistory/2513B3335658B7B32A",  # 공지사항 이미지 (플레이스홀더)
+    "취업": "https://t1.daumcdn.net/cfile/tistory/2513B3335658B7B32A",  # 취업 이미지 (플레이스홀더)
+    "연락처": "https://t1.daumcdn.net/cfile/tistory/2513B3335658B7B32A",  # 연락처 이미지 (플레이스홀더)
+    "홈피": "https://www.kmou.ac.kr/kmou/images/common/logo.png",  # 한국해양대 로고 (실제 URL)
+    "default": "https://www.kmou.ac.kr/kmou/images/common/logo.png",  # 기본 이미지 (한국해양대 로고)
+}
+
+# ==========================================
 # [Tool] 파일 직접 읽기 도구 (RAG 보조)
 # ==========================================
 def read_text_file(filename: str) -> str:
@@ -377,6 +468,80 @@ async def ask_ara(
         return "죄송해요. 현재 AI 서버 연결에 문제가 있어 답변을 드릴 수 없어요. 😢"
 
     try:
+        # ==========================================
+        # [속도 최적화] 키워드 기반 직접 라우팅
+        # LLM Function Calling을 우회하여 즉시 데이터 조회
+        # ==========================================
+        user_input_lower = user_input.lower().strip()
+        
+        # 키워드 매칭 (부분 일치)
+        matched_function = None
+        matched_args = {}
+        
+        for keyword, (func_name, args) in DIRECT_ROUTING.items():
+            if keyword in user_input_lower:
+                matched_function = func_name
+                matched_args = args.copy()
+                
+                # 청년 정책의 경우 키워드 추출
+                if func_name == "get_youth_policy":
+                    # 사용자 입력에서 청년 정책 관련 키워드 추출
+                    keywords_to_remove = ["청년", "지원금", "정책", "지원", "청년정책"]
+                    extracted_keyword = user_input
+                    for kw in keywords_to_remove:
+                        extracted_keyword = extracted_keyword.replace(kw, "").strip()
+                    if extracted_keyword:
+                        matched_args["keyword"] = extracted_keyword[:20]  # 최대 20자
+                    else:
+                        matched_args["keyword"] = "청년"
+                
+                logger.info(f"⚡ [Direct Route] 키워드 '{keyword}' 매칭 → {func_name} 직접 실행")
+                break
+        
+        # 직접 라우팅이 매칭되면 즉시 실행 (LLM 호출 생략)
+        if matched_function:
+            try:
+                result = None
+                
+                if matched_function == "get_university_info":
+                    # 파일 직접 읽기
+                    category = matched_args.get("category")
+                    result = read_text_file(category)
+                    
+                elif matched_function == "get_youth_policy":
+                    # 청년 정책 API 호출
+                    keyword = matched_args.get("keyword", "청년")
+                    result = await get_youth_policy(keyword)
+                    
+                elif matched_function in TOOL_MAP:
+                    # 실시간 API 호출
+                    tool_func = TOOL_MAP[matched_function]
+                    if asyncio.iscoroutinefunction(tool_func):
+                        result = await tool_func(**matched_args)
+                    else:
+                        result = tool_func(**matched_args)
+                    
+                    # 결과를 문자열로 변환
+                    if not isinstance(result, str):
+                        result = json.dumps(result, ensure_ascii=False)
+                
+                if result:
+                    # 빠른 응답 생성 (간단한 포맷팅)
+                    formatted_result = str(result)
+                    
+                    # 카카오톡 최적화 포맷팅
+                    if len(formatted_result) > 800:
+                        formatted_result = formatted_result[:800] + "\n\n(내용이 길어 일부만 표시했습니다. 자세한 내용은 학교 홈페이지를 확인해주세요.)"
+                    
+                    logger.info(f"✅ [Direct Route] 즉시 응답 생성 완료 ({len(formatted_result)}자)")
+                    return formatted_result
+                    
+            except Exception as e:
+                logger.error(f"❌ [Direct Route] 실행 오류: {e}")
+                # 오류 발생 시 일반 LLM 경로로 폴백
+                pass
+        
+        # 직접 라우팅이 없거나 실패한 경우 일반 LLM 경로로 진행
         # 1. RAG: 학교 데이터베이스에서 관련 컨텍스트 검색
         university_context = None
         try:
@@ -480,15 +645,23 @@ async def ask_ara(
             {"role": "user", "content": user_input}
         ]
         
-        # 4. Function Calling을 포함한 첫 번째 LLM 호출
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=messages,
-            tools=ALL_TOOLS if ALL_TOOLS else None,
-            tool_choice="auto",
-            temperature=0.2,  # 정확성을 위해 낮은 온도 (대기업 수준의 일관성)
-            max_tokens=1000  # 상세한 답변을 위한 토큰 증가
-        )
+        # 4. Function Calling을 포함한 첫 번째 LLM 호출 (타임아웃: 2초)
+        try:
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    tools=ALL_TOOLS if ALL_TOOLS else None,
+                    tool_choice="auto",
+                    temperature=0.2,  # 정확성을 위해 낮은 온도 (대기업 수준의 일관성)
+                    max_tokens=1000  # 상세한 답변을 위한 토큰 증가
+                ),
+                timeout=2.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ [LLM] 첫 번째 호출 타임아웃 (2초 초과)")
+            # 타임아웃 시 간단한 응답 반환
+            return "죄송해요. 응답 생성에 시간이 걸리고 있어요. 잠시 후 다시 시도해주세요. 😅"
         
         message = response.choices[0].message
         messages.append(message)
@@ -563,15 +736,23 @@ async def ask_ara(
                     "content": str(tool_result)
                 })
             
-            # Tool 결과를 바탕으로 다음 응답 생성
-            response = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                tools=ALL_TOOLS if ALL_TOOLS else None,
-                tool_choice="auto",
-                temperature=0.2,  # 정확성을 위해 낮은 온도
-                max_tokens=1000
-            )
+            # Tool 결과를 바탕으로 다음 응답 생성 (타임아웃: 1.5초)
+            try:
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=messages,
+                        tools=ALL_TOOLS if ALL_TOOLS else None,
+                        tool_choice="auto",
+                        temperature=0.2,  # 정확성을 위해 낮은 온도
+                        max_tokens=1000
+                    ),
+                    timeout=1.5
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ [LLM] Tool Round {iteration} 응답 타임아웃 (1.5초 초과)")
+                # 타임아웃 시 이전 메시지의 내용을 사용하거나 간단한 응답 반환
+                break  # 루프 종료하고 현재까지의 결과 반환
             
             message = response.choices[0].message
             messages.append(message)
@@ -621,27 +802,61 @@ async def process_query(
         user_id: 사용자 ID (선택)
         image_url: 이미지 URL (선택, OCR 처리용)
     """
+    start_time = asyncio.get_event_loop().time()
     try:
         logger.info(f"🤖 [Agent] 질문 수신: {user_utterance}")
         
-        # OCR 처리 (이미지 URL이 있는 경우)
+        # OCR 처리 (이미지 URL이 있는 경우) - 타임아웃 1초
         final_user_input = user_utterance
         if image_url:
-            logger.info(f"📷 [OCR] 이미지 처리 시작: {image_url}")
-            ocr_text = await ocr_image(image_url)
-            if ocr_text:
-                final_user_input = f"[이미지 내용]: {ocr_text}\n\n{user_utterance}"
-                logger.info(f"✅ [OCR] 텍스트 추출 완료: {ocr_text[:50]}...")
-            else:
-                logger.warning("⚠️ [OCR] 텍스트 추출 실패")
+            try:
+                logger.info(f"📷 [OCR] 이미지 처리 시작: {image_url}")
+                ocr_text = await asyncio.wait_for(ocr_image(image_url), timeout=1.0)
+                if ocr_text:
+                    final_user_input = f"[이미지 내용]: {ocr_text}\n\n{user_utterance}"
+                    logger.info(f"✅ [OCR] 텍스트 추출 완료: {ocr_text[:50]}...")
+                else:
+                    logger.warning("⚠️ [OCR] 텍스트 추출 실패")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ [OCR] 타임아웃 (1초 초과)")
+                # OCR 실패해도 계속 진행
         
-        # AI 답변 생성
-        answer_text = await ask_ara(
-            user_input=final_user_input,
-            user_id=user_id,
-            return_meta=False,
-            session_lang="ko"
-        )
+        # AI 답변 생성 - 타임아웃 2.5초 (총 3.5초 이내)
+        try:
+            answer_text = await asyncio.wait_for(
+                ask_ara(
+                    user_input=final_user_input,
+                    user_id=user_id,
+                    return_meta=False,
+                    session_lang="ko"
+                ),
+                timeout=2.5
+            )
+        except asyncio.TimeoutError:
+            logger.warning("⚠️ [Agent] 응답 시간 초과 (2.5초)")
+            answer_text = "죄송해요. 응답 시간이 초과되었어요. 잠시 후 다시 시도해주세요. 😅"
+        
+        # 카드 이미지 선택 로직
+        user_lower = user_utterance.lower()
+        card_image_url = CARD_IMAGES.get("default")
+        
+        # 키워드 기반 이미지 선택
+        if any(kw in user_lower for kw in ["190", "버스", "구본관"]):
+            card_image_url = CARD_IMAGES.get("190", card_image_url)
+        elif any(kw in user_lower for kw in ["학식", "메뉴", "밥", "식단"]):
+            card_image_url = CARD_IMAGES.get("학식", card_image_url)
+        elif any(kw in user_lower for kw in ["셔틀"]):
+            card_image_url = CARD_IMAGES.get("셔틀", card_image_url)
+        elif any(kw in user_lower for kw in ["날씨", "기온", "온도"]):
+            card_image_url = CARD_IMAGES.get("날씨", card_image_url)
+        elif any(kw in user_lower for kw in ["공지", "공지사항"]):
+            card_image_url = CARD_IMAGES.get("공지", card_image_url)
+        elif any(kw in user_lower for kw in ["취업", "정책", "청년"]):
+            card_image_url = CARD_IMAGES.get("취업", card_image_url)
+        elif any(kw in user_lower for kw in ["연락처", "전화", "연락"]):
+            card_image_url = CARD_IMAGES.get("연락처", card_image_url)
+        elif any(kw in user_lower for kw in ["홈피", "홈페이지"]):
+            card_image_url = CARD_IMAGES.get("홈피", card_image_url)
         
         # 퀵 리플라이 버튼 생성
         quick_replies = [
@@ -687,22 +902,60 @@ async def process_query(
             }
         ]
         
-        # 카카오톡 JSON 응답 생성
-        response_payload = {
-            "version": "2.0",
-            "template": {
-                "outputs": [
-                    {
-                        "simpleText": {
-                            "text": str(answer_text)
+        # 카카오톡 JSON 응답 생성 (카드 이미지 포함)
+        # 텍스트가 짧으면 simpleText, 길면 basicCard 사용
+        if len(str(answer_text)) > 200:
+            # 긴 답변: basicCard 형식 (이미지 + 텍스트)
+            response_payload = {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "basicCard": {
+                                "title": "🌊 한국해양대학교 ARA",
+                                "description": str(answer_text)[:500],  # 최대 500자
+                                "thumbnail": {
+                                    "imageUrl": card_image_url
+                                },
+                                "buttons": [
+                                    {
+                                        "action": "message",
+                                        "label": "더 알아보기",
+                                        "messageText": user_utterance
+                                    }
+                                ]
+                            }
                         }
-                    }
-                ],
-                "quickReplies": quick_replies
+                    ],
+                    "quickReplies": quick_replies
+                }
             }
-        }
+        else:
+            # 짧은 답변: basicCard 형식 (이미지 포함)
+            response_payload = {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "basicCard": {
+                                "title": "🌊 한국해양대학교 ARA",
+                                "description": str(answer_text),
+                                "thumbnail": {
+                                    "imageUrl": card_image_url
+                                }
+                            }
+                        }
+                    ],
+                    "quickReplies": quick_replies
+                }
+            }
         
-        logger.info("✅ [Agent] 응답 생성 완료")
+        elapsed_time = asyncio.get_event_loop().time() - start_time
+        logger.info(f"✅ [Agent] 응답 생성 완료 (소요 시간: {elapsed_time:.2f}초)")
+        
+        if elapsed_time > 3.5:
+            logger.warning(f"⚠️ [Agent] 응답 시간 경고: {elapsed_time:.2f}초 (목표: 3.5초 이내)")
+        
         return response_payload
         
     except Exception as e:

@@ -122,25 +122,40 @@ def _extract_user_utterance(payload: dict) -> str:
 def _extract_image_url(payload: dict) -> Optional[str]:
     """
     카카오톡 요청 payload에서 이미지 URL을 추출합니다.
+    
+    로직:
+    1. payload['userRequest']['params']['media']['url'] 경로에서 secureImage 확인
+    2. 없으면 payload['userRequest']['utterance']가 "http"로 시작하고 "kakaocdn"을 포함하는지 확인
+    3. 유효한 URL이 있으면 반환하고, 없으면 None 반환
     """
-    # 1. userRequest.message.photo.url
-    photo = payload.get("userRequest", {}).get("message", {}).get("photo")
-    if photo and isinstance(photo, dict):
-        url = photo.get("url")
-        if url:
-            return url
+    # 1. 카카오톡 이미지 전송 표준 경로: userRequest.params.media.url
+    try:
+        params = payload.get("userRequest", {}).get("params", {})
+        media = params.get("media", {})
+        if isinstance(media, dict):
+            url = media.get("url")
+            if url and isinstance(url, str) and ("secureImage" in url or "kakaocdn" in url):
+                return url
+    except (KeyError, AttributeError, TypeError):
+        pass
     
-    # 2. action.params.image_url
-    action_params = payload.get("action", {}).get("params", {})
-    if "image_url" in action_params:
-        return action_params["image_url"]
+    # 2. 텍스트로 넘어오는 경우: utterance가 http로 시작하고 kakaocdn을 포함하는지 확인
+    try:
+        utterance = payload.get("userRequest", {}).get("utterance", "")
+        if isinstance(utterance, str) and utterance.startswith("http") and "kakaocdn" in utterance:
+            return utterance
+    except (KeyError, AttributeError, TypeError):
+        pass
     
-    # 3. userRequest.message.photo.url (다른 경로)
-    message = payload.get("userRequest", {}).get("message", {})
-    if isinstance(message, dict) and "photo" in message:
-        photo_obj = message["photo"]
-        if isinstance(photo_obj, dict) and "url" in photo_obj:
-            return photo_obj["url"]
+    # 3. 추가 경로: userRequest.message.photo.url (하위 호환성)
+    try:
+        photo = payload.get("userRequest", {}).get("message", {}).get("photo")
+        if photo and isinstance(photo, dict):
+            url = photo.get("url")
+            if url and isinstance(url, str):
+                return url
+    except (KeyError, AttributeError, TypeError):
+        pass
     
     return None
 
@@ -166,11 +181,34 @@ async def message(request: Request):
         # 2-1. 이미지 URL 추출 (OCR 처리용)
         image_url = _extract_image_url(payload)
         if image_url:
-            logger.info(f"📷 [Image] 이미지 URL 발견: {image_url}")
+            logger.info(f"📸 [Image Detected] URL: {image_url}")
+            # 이미지가 있으면 사용자 발화를 이미지 전송 메시지로 변경 (OCR 처리는 agent가 수행)
+            user_utterance = "사용자가 이미지를 보냈습니다."
         
         # 3. [핵심] Agent 로직 호출 (비동기 await 필수!)
         # agent.py의 process_query가 async def로 정의되었으므로 반드시 await를 써야 합니다.
-        response = await process_query(user_utterance, image_url=image_url)
+        # 응답 시간 제한: 3.5초 (카카오톡 타임아웃 방지)
+        import asyncio
+        try:
+            response = await asyncio.wait_for(
+                process_query(user_utterance, image_url=image_url),
+                timeout=3.5
+            )
+        except asyncio.TimeoutError:
+            logger.error("❌ [Timeout] 응답 시간 초과 (3.5초)")
+            response = {
+                "version": "2.0",
+                "template": {
+                    "outputs": [
+                        {
+                            "simpleText": {
+                                "text": "죄송해요. 응답 시간이 초과되었어요. 잠시 후 다시 시도해주세요. 😅"
+                            }
+                        }
+                    ],
+                    "quickReplies": _nav_quick_replies()
+                }
+            }
         
         # 4. 응답 검증 (Dict 타입 확인)
         if not isinstance(response, dict):
